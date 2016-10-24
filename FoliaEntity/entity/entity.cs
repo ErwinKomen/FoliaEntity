@@ -9,7 +9,7 @@ using System.Text;
 using System.Threading.Tasks;
 
 
-namespace FoliaEntity.entity {
+namespace FoliaEntity {
   public class entity {
     // =========================================================================================================
     // Name: entity
@@ -86,6 +86,7 @@ namespace FoliaEntity.entity {
     private bool oneSpotlightRequest(String sMethod, String sConfidence, ref List<link> lstLinks) {
       String sXmlPost = "";
       String sData = "";
+      XmlWriterSettings wrSet = new XmlWriterSettings();
 
       try {
 
@@ -105,14 +106,21 @@ namespace FoliaEntity.entity {
             ndxSurface.Attributes["name"].Value = this.loc_sEntity;
             ndxSurface.Attributes["offset"].Value = this.loc_sOffset;
             // Convert the xml document to a string
-            sXmlPost = pdxData.ToString();
+            wrSet.OmitXmlDeclaration = true;
+            wrSet.Encoding = Encoding.UTF8;
+            using (var stringWriter = new StringWriter())
+              using (var xmlTextWriter = XmlWriter.Create(stringWriter, wrSet)) {
+              pdxData.WriteTo(xmlTextWriter);
+              xmlTextWriter.Flush();
+              sXmlPost = stringWriter.GetStringBuilder().ToString();
+            }
             break;
         }
         // Prepare the POST string to be sent
-        NameValueCollection oQueryString = HttpUtility.ParseQueryString(String.Empty);
+        NameValueCollection oQueryString = HttpUtility.ParseQueryString(String.Empty, Encoding.UTF8);
         oQueryString.Add("confidence", sConfidence);
         oQueryString.Add("text", sXmlPost);
-        sData = oQueryString.ToString();
+        sData = Uri.EscapeUriString(HttpUtility.UrlDecode(oQueryString.ToString()));
 
         // Make a request
         XmlDocument pdxReply = MakeXmlPostRequest(sMethod, sData);
@@ -126,7 +134,7 @@ namespace FoliaEntity.entity {
             XmlNode resThis = lstResources[i];
             // Calculate 'found' and 'classmatch'
             String eClass = this.loc_sClass;
-            String resType = resThis.Attributes["offset"].Value;
+            String resType = resThis.Attributes["types"].Value;
             String sClassMatch = "no";
             String sHit = "";
             bool bFound = false;
@@ -201,16 +209,29 @@ namespace FoliaEntity.entity {
         String sRequest = sApiStart + sMethod.ToLower();
 
         // Create a request
-        WebRequest request = WebRequest.Create(sRequest);
+        HttpWebRequest request = (HttpWebRequest) WebRequest.Create(sRequest);
         // Set the method correctly
         request.Method = "POST";
         request.ContentLength = postBytes.Length;
         request.ContentType = "application/x-www-form-urlencoded";
-        // Set the header such a way that an XML reply is expected
-        request.Headers.Add(HttpRequestHeader.Accept, "text/xml");
+        request.Accept = "text/xml";
+
+        Stream dataStream = request.GetRequestStream();
+        // Write the data to the request stream
+        dataStream.Write(postBytes, 0, postBytes.Length);
+        dataStream.Close();
+
+        //// Set the header such a way that an XML reply is expected
+        //request.Headers.Add(HttpRequestHeader.Accept, "text/xml");
 
         // Get a response
-        WebResponse response = request.GetResponse();
+        HttpWebResponse response = null;
+        try {
+          response = (HttpWebResponse)request.GetResponse();
+        } catch (Exception e) {
+          errHandle.DoError("entity/MakeXmlPostRequest", e); // Provide standard error message
+          return null;
+        }
         StringBuilder sbReply = new StringBuilder();
         // Process the result
         using (Stream strResponse = response.GetResponseStream())

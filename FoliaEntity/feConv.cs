@@ -5,9 +5,8 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.IO;
 using System.Xml;
-using System.Xml.Serialization;
-using FoliaEntity.conv;
 using System.Diagnostics;
+using FoliaEntity;
 
 namespace FoliaEntity {
   /* -------------------------------------------------------------------------------------
@@ -28,14 +27,14 @@ namespace FoliaEntity {
      * Goal:        Master routine to parse one folia.xml Dutch file (Sonar + Lassy)
      * Parameters:  sFileIn     - File to be processed
      *              sDirOut     - Directory where the output files should come
-     *              sDirParsed  - Directory where already parsed Alpino files are kept
+     *              sAnnotator  - Name of the annotator
      *              bOverwrite  - Overwrite existing output or not
      *              bIsDebug    - Debugging mode on or off
      *              bKeepGarbage- Do not delete temporary files
      * History:
      * 24/oct/2016 ERK Created
        ------------------------------------------------------------------------------------- */
-    public bool ParseOneFoliaEntity(String sFileIn, String sDirOut, String sDirParsed,
+    public bool ParseOneFoliaEntity(String sFileIn, String sDirOut, String sAnnotator,
         bool bOverwrite, bool bIsDebug, bool bKeepGarbage) {
       XmlDocument pdxSent = null; // The folia input sentence
       XmlNode ndxFoliaS;          // Input FoLiA format sentence
@@ -49,6 +48,7 @@ namespace FoliaEntity {
       List<XmlDocument> lstAlp;   // Container for the Alpino parses
       List<String> lstAlpFile;    // Alpino file names
       util.xmlTools oXmlTools = new util.xmlTools(errHandle);
+      String sConfidence = "0.20";
 
       try {
         // Validate
@@ -120,7 +120,7 @@ namespace FoliaEntity {
                 oXmlTools.SetXmlDocument(pdxAnn);
                 ndxFoliaS = pdxAnn.SelectSingleNode("./descendant-or-self::df:annotations", nsFolia);
                 oXmlTools.AddXmlChild(ndxFoliaS, "alignment-annotation",
-                  "annotator", "ErwinKomen", "attribute",
+                  "annotator", sAnnotator, "attribute",
                   "annotatortype", "automatic", "attribute",
                   "set", "ErwinKomen-NEL", "attribute");
                 // (4) Write the new <annotations> node to the writer
@@ -172,11 +172,11 @@ namespace FoliaEntity {
                       // Make sure spaces are added at the appropriate places
                       if (sSent != "") sSent += " ";
                       // Note where the offset is
-                      if (lstW[k].Attributes["id"].Value == idStart) {
-                        { iOffset = sSent.Length; }
+                      if (lstW[k].ParentNode.Attributes["xml:id"].Value == idStart) {
+                        iOffset = sSent.Length;
                       }
                       // Extend the sentence
-                      sSent += lstW[k].Value;
+                      sSent += lstW[k].InnerText;
                     }
 
                     // Check and remove any existing alignments...
@@ -184,59 +184,31 @@ namespace FoliaEntity {
                     for (int k=lstAlg.Count-1;k>=0;k--) { lstAlg[k].RemoveAll(); lstEnt[j].RemoveChild(lstAlg[k]); }
 
                     // Create an entity object to be processed
+                    String sClass = lstEnt[j].Attributes["class"].Value;
+                    entity oEntity = new entity(this.errHandle, sEntity, sClass, sSent, iOffset.ToString(), idStart);
 
-                  }
-                  // (4) retrieve the parse of the tokenized sentence
-                  String sAlpFile = sFileOutDir + "/" + iSentNum + ".xml";
-                  if (!getAlpinoParse(sAlpFile, lstAlp, lstAlpFile)) {
-                    errHandle.DoError("ParseOneFoliaWithAlpino", "Failed to perform getAlpinoParse");
-                    return false;
-                  }
-                  if (lstAlp.Count == 0) { errHandle.DoError("ParseOneFoliaWithAlpino", "Could not retrieve parsed alpino sentence"); return false; }
-                  // (5) Retrieve the *first* alpino parse
-                  XmlNode ndxAlpino = lstAlp[0].SelectSingleNode("./descendant-or-self::alpino_ds");
-                  // (6) ALpino -> Psdx: convert the <node> structure into a psdx one with <forest> and <eTree> etc
-                  XmlNode ndxPsdx = objAlpPsdx.oneSent(ndxAlpino, sSentId, lstAlpFile[0], ref lstW);
-                  // (7) Psdx -> FoLiA: Convert the <forest> structure to a FoLiA sentence <s>
-                  XmlNode ndxFolia = objPsdxFolia.oneSent(ndxPsdx, sSentId, "", ref lstW);
+                    if (oEntity.oneEntityToLinks(sConfidence)) {
+                      // Process the alignments that have been found
+                      List<link> lstAlign = oEntity.get_links();
+                      for (int k=0;k<lstAlign.Count;k++) {
+                        // Process this link
+                        link lnkThis = lstAlign[k];
+                        // TODO: convert this link into an <alignment> thing and add it to the current <entity>
+                        XmlDocument pdxAlign = new XmlDocument();
+                        String sAlignModel = "<FoLiA xmlns:xlink='http://www.w3.org/1999/xlink' xmlns='http://ilk.uvt.nl/folia'>" +
+                          "<s><alignment format='application/json' class='NEL' xlink:href='' xlink:type='simple'></alignment>" +
+                          "</s></FoLiA>";
+                        pdxAlign.LoadXml(sAlignModel);
+                        // Set up a namespace manager for folia
+                        XmlNamespaceManager nmsDf = new XmlNamespaceManager(pdxAlign.NameTable);
+                        nmsDf.AddNamespace("df", pdxAlign.DocumentElement.NamespaceURI);
 
-                  // (8) Insert the <syntax> node as child to the original <s> node
-                  ndxFoliaS = pdxSrc.SelectSingleNode("./descendant-or-self::df:s[@xml:id = '" + sSentId + "']", nsFolia);
-                  // XmlDocument pdxFolia = ndxFolia.OwnerDocument;
-                  XmlNode ndxSyntax = pdxSrc.ImportNode(ndxFolia.SelectSingleNode("./descendant-or-self::syntax"), true);
-                  ndxFoliaS.AppendChild(ndxSyntax);
-
-                  // (9) Copy the adaptations of the word list into the [pdxSrc] list
-                  oXmlTools.SetXmlDocument(pdxSrc);
-                  XmlNode ndxLastW = ndxFoliaS.SelectSingleNode("./descendant::df:w[last()]", nsFolia);
-                  for (int j = 0; j < lstW.Count; j++) {
-                    // Get this element and the class
-                    XmlNode ndxOneW = lstW[j]; String sClass = ndxOneW.Attributes["class"].Value;
-                    // Action depends on type
-                    switch (sClass) {
-                      case "Zero":
-                      case "Star":
-                        // Relocate the new node
-                        ndxLastW.ParentNode.InsertAfter(ndxOneW, ndxLastW);
-                        ndxLastW = ndxOneW;
-                        break;
-                      default:
-                        // Adding the class attribute is not needed: it is already done in the list
-                        //oXmlTools.AddAttribute(ndxFoliaS.SelectSingleNode("./descendant::df:w[@xml:id='" +
-                        //  ndxOneW.Attributes["xml:id"].Value + "']", nsFolia), "class", sClass);
-                        break;
+                        XmlNode ndxAlignment = pdxAlign.SelectSingleNode("./descendant-or-self::df:alignment", nmsDf);
+                        ndxAlignment.Attributes["xlink:href"].Value = lnkThis.uri;
+                        lstEnt[j].AppendChild(pdxSrc.ImportNode(ndxAlignment, true));
+                      }
                     }
-                  }
 
-                  // (9) Check for <t> nodes under the original folia
-                  if (ndxFoliaS.SelectNodes("./child::t", nsFolia).Count == 0) {
-                    // Get all <t> nodes in the created folia
-                    XmlNodeList ndxTlist = ndxFolia.SelectNodes("./child::t");
-                    for (int j = 0; j < ndxTlist.Count; j++) {
-                      // Copy this <t> node
-                      XmlNode ndxOneT = pdxSrc.ImportNode(ndxTlist[j], true);
-                      ndxFoliaS.PrependChild(ndxOneT);
-                    }
                   }
                 }
 

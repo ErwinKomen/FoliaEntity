@@ -37,8 +37,7 @@ namespace FoliaEntity {
     static void Main(string[] args) {
       String sInput = "";       // Input file or dir
       String sOutput = "";      // Output directory
-      String sAlpino = "";      // Possible location of program
-      String sParsed = "";      // Directory where parsed files are kept
+      String sAnnot = "";       // Name of annotator
       bool bIsDebug = false;    // Debugging
       bool bKeepGarbage = false;// Keep garbage?
       bool bOverwrite = false;  // Do not overwrite
@@ -63,15 +62,11 @@ namespace FoliaEntity {
               case "w": // Overwrite output
                 bOverwrite = true;
                 break;
-              case "a": // Alpino executable location (alternative w.r.t. default Science one)
-                sAlpino = args[++i].ToLower();
+              case "a": // Annotator name
+                sAnnot = args[++i].ToLower();
                 break;
               case "g": // Keep garbage for manual inspection
                 bKeepGarbage = true;
-                break;
-              case "p": // Directory where corresponding [p]arsed files are kept
-                        // These are in .data and .index files (possibly with .data.dz)
-                sParsed = args[++i];
                 break;
             }
           } else {
@@ -112,7 +107,7 @@ namespace FoliaEntity {
         // Loop through the input files
         for (int i = 0; i < arInput.Length; i++) {
           // Parse this input file to the output directory
-          if (!objConv.ParseOneFoliaEntity(arInput[i], sOutput, sParsed, bOverwrite, bIsDebug, bKeepGarbage)) {
+          if (!objConv.ParseOneFoliaEntity(arInput[i], sOutput, sAnnot, bOverwrite, bIsDebug, bKeepGarbage)) {
             errHandle.DoError("Main", "Could not parse file [" + arInput[i] + "]");
             return;
           }
