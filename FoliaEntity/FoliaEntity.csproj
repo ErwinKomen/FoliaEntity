@@ -34,6 +34,7 @@
   <ItemGroup>
     <Reference Include="System" />
     <Reference Include="System.Core" />
+    <Reference Include="System.Web" />
     <Reference Include="System.Xml.Linq" />
     <Reference Include="System.Data.DataSetExtensions" />
     <Reference Include="Microsoft.CSharp" />
@@ -42,11 +43,21 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="entity\entity.cs" />
+    <Compile Include="feConv.cs" />
     <Compile Include="feMain.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="util\ErrHandle.cs" />
+    <Compile Include="util\General.cs" />
+    <Compile Include="util\psdxTools.cs" />
+    <Compile Include="util\xmlTools.cs" />
+    <Compile Include="util\XPathExtensions.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="conv\" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
