@@ -8,6 +8,7 @@ using System.IO.Compression;
 
 namespace FoliaEntity.util {
   class General {
+    static ErrHandle errHandle = new ErrHandle();
     // ------------------------------------------------------------------------------------
     // Name:   DoLike
     // Goal:   Perform the "Like" function using the pattern (or patterns) stored in [strPattern]
@@ -62,6 +63,7 @@ namespace FoliaEntity.util {
        ------------------------------------------------------------------------------------- */
     public static List<String> getFilesSorted(String sDir, String sFilter, String sType = "length") {
       try {
+
         // Access the file system
         System.IO.DirectoryInfo dir = new System.IO.DirectoryInfo(sDir);
         // Then get the files from here
@@ -98,7 +100,6 @@ namespace FoliaEntity.util {
       } catch (Exception ex) {
         ErrHandle.HandleErr("General/getFilesSorted", ex); // Provide standard error message
         return null;
-        throw;
       }
     }
     static long GetFileLength(System.IO.FileInfo fi) {

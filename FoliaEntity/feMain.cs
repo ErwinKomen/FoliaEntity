@@ -38,6 +38,9 @@ namespace FoliaEntity {
       String sInput = "";       // Input file or dir
       String sOutput = "";      // Output directory
       String sAnnot = "";       // Name of annotator
+      String sLogFile = "";     // Name of log file
+      int iHits = 0;            // Total hits
+      int iFail = 0;            // Total failures
       bool bIsDebug = false;    // Debugging
       bool bKeepGarbage = false;// Keep garbage?
       bool bOverwrite = false;  // Do not overwrite
@@ -74,6 +77,12 @@ namespace FoliaEntity {
             SyntaxError("1 - i=" + i + " args=" + args.Length + " argCurrent=[" + sArg + "]"); return;
           }
         }
+
+        //// ================ DEBUG ===============
+        //errHandle.Status("Debugging: " + bIsDebug + "\n");
+        //errHandle.Status("sInput: " + sInput + "\n");
+        //errHandle.Status("sOutput: " + sOutput + "\n");
+
         // Check presence of input/output
         if (sInput == "" || sOutput == "") { SyntaxError("2"); return; }
         // Check if the input is a directory or file
@@ -85,7 +94,12 @@ namespace FoliaEntity {
           if (sInput == sOutput) { SyntaxError("3"); return; }
           // Get all files in this dir
           // arInput = Directory.GetFiles(sInput, "*.folia.xml", SearchOption.AllDirectories);
-          arInput = General.getFilesSorted(sInput, "*.folia.xml", "name").ToArray();
+          List<String> lstInput = General.getFilesSorted(sInput, "*.folia.xml", "name");
+          if (lstInput==null) {
+            errHandle.Status("Could not sort files\n");
+            return;
+          }
+          arInput = lstInput.ToArray();
         } else {
           // Show we don't have input file
           errHandle.DoError("Main", "Cannot find input file(s) in: " + sInput);
@@ -97,6 +111,11 @@ namespace FoliaEntity {
           // Create the output directory
           Directory.CreateDirectory(sOutput);
         }
+        // Create output log file
+        sLogFile = Path.GetFullPath( "./foliaentity.log");
+        if (File.Exists(sLogFile)) {
+          File.WriteAllText(sLogFile, "");
+        }
         // Call the main entry point for the conversion
         feConv objConv = new feConv();
 
@@ -104,16 +123,34 @@ namespace FoliaEntity {
         // Initialise the Treebank Xpath functions, which may make use of tb:matches()
         util.XPathFunctions.conTb.AddNamespace("tb", util.XPathFunctions.TREEBANK_EXTENSIONS);
 
+        if (bIsDebug) {
+          errHandle.Status("Starting...\n");
+        }
+
         // Loop through the input files
         for (int i = 0; i < arInput.Length; i++) {
+          int iHitsHere = 0;
+          int iFailHere = 0;
           // Parse this input file to the output directory
-          if (!objConv.ParseOneFoliaEntity(arInput[i], sOutput, sAnnot, bOverwrite, bIsDebug, bKeepGarbage)) {
+          if (!objConv.ParseOneFoliaEntity(sInput, arInput[i], sOutput, sAnnot, bOverwrite, 
+              bIsDebug, bKeepGarbage, ref iHitsHere, ref iFailHere)) {
+            // Provide an error message and exit
             errHandle.DoError("Main", "Could not parse file [" + arInput[i] + "]");
             return;
           }
+          // Provide an overall score
+          String sName = Path.GetFileName(arInput[i]);
+          String sLogMsg = "Text:\t" + sName + "\tHits:\t" + iHitsHere + "\tFail:\t" + iFailHere + "\n";
+          File.AppendAllText(sLogFile, sLogMsg);
+          // Bookkeeping
+          iHits += iHitsHere;
+          iFail += iFailHere;
         }
+        // Provide an overall score
+        String sMsg = "Texts:\t" + arInput.Length + "\tHits:\t" + iHits + "\tFail:\t" + iFail + "\n";
+        File.AppendAllText(sLogFile,sMsg);
         // Exit the program
-        Console.WriteLine("Ready");
+        errHandle.Status("Ready. Log file: " + sLogFile);
       } catch (Exception ex) {
         errHandle.DoError("Main", ex); // Provide standard error message
         throw;
@@ -129,8 +166,8 @@ namespace FoliaEntity {
      * 2/oct/2015 ERK Created
        ------------------------------------------------------------------------------------- */
     static void SyntaxError(String sChk) {
-      Console.WriteLine("Syntax: foliaparse -i inputFileOrDir -o outputDir [-d] [-g] " +
-        "[-m {method}] [-a {alpinolocation}]\n" +
+      Console.WriteLine("Syntax: foliaentity -i inputFileOrDir -o outputDir [-d] [-g] " +
+        "[-w] [-a {annotator}]\n" +
         "\n\n\tMethods: file, sentence, two-pass\n" +
         "\n\n\tNote: output directory must differ from input one\n" +
         "\n\tCheckpoint #" + sChk);

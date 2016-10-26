@@ -1,12 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.Specialized;
 using System.Net;
 using System.Xml;
-using System.Collections.Specialized;
 using System.Web;
 using System.IO;
 using System.Text;
-using System.Threading.Tasks;
+using System.Text.RegularExpressions;
 
 
 namespace FoliaEntity {
@@ -31,6 +31,8 @@ namespace FoliaEntity {
     private int loc_iFail = 0;
     private List<link> loc_lstLinks = null; // Resulting links
     private String loc_sReqModel = "<annotation text=''><surfaceForm name='' offset='' /></annotation>";
+    private Regex regHref = new Regex("(href=['\"]?)([^'\"]+)");
+    private bool bDebug = false;        // Debugging set or not
     // =========================================================================================================
     public entity(ErrHandle objErr, String sEntity, String sClass, String sSent, String sOffset, String sId) {
       this.errHandle = objErr;
@@ -46,6 +48,9 @@ namespace FoliaEntity {
 
     // ================== GETTERS and SETTERS =================================================================
     public List<link> get_links() { return this.loc_lstLinks; }
+    public int get_hits() { return this.loc_iHits; }
+    public int get_fail() { return this.loc_iFail; }
+    public void set_debug(bool bSet) { this.bDebug = bSet; }
 
     /* -------------------------------------------------------------------------------------
      * Name:        oneEntityToLinks
@@ -74,6 +79,7 @@ namespace FoliaEntity {
       }
     }
 
+
     /* -------------------------------------------------------------------------------------
      * Name:        oneSpotlightRequest
      * Goal:        Perform one request to SPOTLIGHT
@@ -100,11 +106,13 @@ namespace FoliaEntity {
             XmlDocument pdxData = new XmlDocument();
             pdxData.LoadXml(loc_sReqModel);
             // Fill in the variables in this XML document
-            XmlNode ndxAnn = pdxData.SelectSingleNode("./descendant-or-self::annotation");
-            ndxAnn.Attributes["text"].Value = this.loc_sSent;
             XmlNode ndxSurface = pdxData.SelectSingleNode("./descendant::surfaceForm");
             ndxSurface.Attributes["name"].Value = this.loc_sEntity;
             ndxSurface.Attributes["offset"].Value = this.loc_sOffset;
+            XmlNode ndxAnn = pdxData.SelectSingleNode("./descendant-or-self::annotation");
+            // Take the text, but make sure that the quotation marks " are changed to single quotes
+            ndxAnn.Attributes["text"].Value = this.loc_sSent;   // .Replace("\"", "'");
+            // ndxAnn.Attributes["text"].Value = System.Security.SecurityElement.Escape(this.loc_sSent);
             // Convert the xml document to a string
             wrSet.OmitXmlDeclaration = true;
             wrSet.Encoding = Encoding.UTF8;
@@ -114,16 +122,30 @@ namespace FoliaEntity {
               xmlTextWriter.Flush();
               sXmlPost = stringWriter.GetStringBuilder().ToString();
             }
+            // Do escaping
+            // sXmlPost = pdxData.OuterXml;
+            // sXmlPost = System.Security.SecurityElement.Escape(sXmlPost);
+            // sXmlPost = Uri.EscapeUriString(sXmlPost);
             break;
         }
+
+        // Make sure URL encoding is done for the XmlPost
+        // sXmlPost = HttpUtility.UrlEncode(HttpUtility.UrlDecode(sXmlPost), Encoding.UTF8);
+
         // Prepare the POST string to be sent
-        NameValueCollection oQueryString = HttpUtility.ParseQueryString(String.Empty, Encoding.UTF8);
-        oQueryString.Add("confidence", sConfidence);
-        oQueryString.Add("text", sXmlPost);
-        sData = Uri.EscapeUriString(HttpUtility.UrlDecode(oQueryString.ToString()));
+        //NameValueCollection oQueryString = HttpUtility.ParseQueryString(String.Empty, Encoding.UTF8);
+        //oQueryString.Add("confidence", sConfidence);
+        //oQueryString.Add("text", sXmlPost);
+        //// sData = Uri.EscapeUriString(HttpUtility.UrlDecode(oQueryString.ToString()));
+        //sData = oQueryString.ToString();
+        sData = "confidence=" + sConfidence + "&text=" + HttpUtility.UrlEncode(sXmlPost, Encoding.UTF8);
 
         // Make a request
         XmlDocument pdxReply = MakeXmlPostRequest(sMethod, sData);
+        if (pdxReply == null) {
+          // Try to get a reply from the HTML
+          pdxReply = MakeHtmlPostRequest(sMethod, sData, this.loc_sEntity);
+        }
 
         // Check the reply and process it
         if (pdxReply != null) {
@@ -140,16 +162,16 @@ namespace FoliaEntity {
             bool bFound = false;
             switch (eClass) {
               case "loc":   // location
-                if (resType.Contains(":Place")) { bFound = true; sClassMatch = "yes"; }
+                if (resType == "" || resType.Contains(":Place")) { bFound = true; sClassMatch = "yes"; }
                 break;
               case "org":   // organization
-                if (resType.Contains("Organization") || resType.Contains("Organisation")) { bFound = true; sClassMatch = "yes"; }
+                if (resType == "" || resType.Contains("Organization") || resType.Contains("Organisation")) { bFound = true; sClassMatch = "yes"; }
                 break;
               case "pro":   // product
-                if (resType.Contains(":Language")) { bFound = true; sClassMatch = "yes"; }
+                if (resType == "" || resType.Contains(":Language")) { bFound = true; sClassMatch = "yes"; }
                 break;
               case "per":   // person
-                if (resType.Contains(":Agent")) { bFound = true; sClassMatch = "yes"; }
+                if (resType == "" || resType.Contains(":Agent")) { bFound = true; sClassMatch = "yes"; }
                 break;
               case "misc":  // miscellaneous
                 bFound = true; sClassMatch = "misc";
@@ -167,7 +189,8 @@ namespace FoliaEntity {
             }
 
             // Create a link object
-            link oLink = new link(resThis.Attributes["URI"].Value,
+            link oLink = new link(sMethod,
+              resThis.Attributes["URI"].Value,
               resThis.Attributes["surfaceForm"].Value, 
               resThis.Attributes["types"].Value,
               sClassMatch, 
@@ -178,6 +201,13 @@ namespace FoliaEntity {
               sHit);
             // Add the link object to the list of what is returned
             lstLinks.Add(oLink);
+
+            // ================ DEBUG ===============
+            //if (this.loc_sEntity.Contains("Vlaanderen")) {
+            //  int j = 0;
+            //}
+            // ======================================
+
           }
         }
 
@@ -192,7 +222,7 @@ namespace FoliaEntity {
 
     /* -------------------------------------------------------------------------------------
      * Name:        MakeXmlPostRequest
-     * Goal:        Issue a POST request 
+     * Goal:        Issue a POST request  that expects an XML answer
      * Parameters:  sMethod     - Either 'disambiguate' or 'annotate'
      *              sConfidence - Minimal level of confidence that should be met
      *              lstLinks    - List of 'link' objects
@@ -226,14 +256,98 @@ namespace FoliaEntity {
 
         // Get a response
         HttpWebResponse response = null;
+        String sReply = "";
+        try {
+          // Try to get a response
+          response = (HttpWebResponse)request.GetResponse();
+        } catch (Exception e) {
+          if (this.bDebug) {
+            errHandle.Status("MakeXmlPostRequest does not work; Trying Html request instead.");
+          }
+          return null;
+        }
+        // Process the result: get it as a string
+        sReply = readResponse(ref response);
+        // Convert the XML reply to a processable object
+        XmlDocument pdxReply = new XmlDocument();
+        pdxReply.LoadXml(sReply);
+        // Return the XML document
+        return pdxReply;
+      } catch (Exception e) {
+        errHandle.DoError("entity/MakeXmlPostRequest", e); // Provide standard error message
+        return null;
+      }
+    }
+
+    /* -------------------------------------------------------------------------------------
+     * Name:        MakeHtmlPostRequest
+     * Goal:        Issue a POST request  that expects a HTML answer
+     * Parameters:  sMethod     - Either 'disambiguate' or 'annotate'
+     *              sConfidence - Minimal level of confidence that should be met
+     *              lstLinks    - List of 'link' objects
+     * History:
+     * 24/oct/2016 ERK Created
+       ------------------------------------------------------------------------------------- */
+    private XmlDocument MakeHtmlPostRequest(String sMethod, String sData, String sEntity) {
+      try {
+        // Prepare the data
+        ASCIIEncoding ascii = new ASCIIEncoding();
+        byte[] postBytes = ascii.GetBytes(sData.ToString());
+
+        // Create the request string
+        String sRequest = sApiStart + sMethod.ToLower();
+
+        // Create a request
+        HttpWebRequest request = (HttpWebRequest)WebRequest.Create(sRequest);
+        // Set the method correctly
+        request.Method = "POST";
+        request.ContentLength = postBytes.Length;
+        request.ContentType = "application/x-www-form-urlencoded";
+        request.Accept = "text/html";
+
+        Stream dataStream = request.GetRequestStream();
+        // Write the data to the request stream
+        dataStream.Write(postBytes, 0, postBytes.Length);
+        dataStream.Close();
+
+        // Get a response
+        HttpWebResponse response = null;
+        String sReply = "";
         try {
           response = (HttpWebResponse)request.GetResponse();
         } catch (Exception e) {
-          errHandle.DoError("entity/MakeXmlPostRequest", e); // Provide standard error message
+          errHandle.DoError("entity/MakeHtmlPostRequest", e); // Provide standard error message
           return null;
         }
+        // Process the result: get it as a string
+        String sHtml = readResponse(ref response);
+        // Get the correct href= from the string using RE
+        Match mcHtml = regHref.Match(sHtml);
+        if (!mcHtml.Success || mcHtml.Groups.Count<3) {
+          // No answer after all
+          return null;
+        }
+        String sHref = mcHtml.Groups[2].Value;
+        sReply = "<Resources><Resource URI='' support='0' types='' surfaceForm='' offset='0' similarityScore='1.0' percentageOfSecondRank='0.0' /></Resources>";
+        // Convert the XML reply to a processable object
+        XmlDocument pdxReply = new XmlDocument();
+        pdxReply.LoadXml(sReply);
+        // Add the URI
+        XmlNode ndxRes = pdxReply.SelectSingleNode("./descendant::Resource[1]");
+        ndxRes.Attributes["URI"].Value = sHref;
+        ndxRes.Attributes["surfaceForm"].Value = sEntity;
+        // Return the XML document
+        return pdxReply;
+      } catch (Exception e) {
+        errHandle.DoError("entity/MakeHtmlPostRequest", e); // Provide standard error message
+        return null;
+      }
+    }
+
+    private String readResponse(ref HttpWebResponse response) {
+      try {
+        // Process the result: get it as a string
         StringBuilder sbReply = new StringBuilder();
-        // Process the result
         using (Stream strResponse = response.GetResponseStream())
         using (StreamReader rdThis = new StreamReader(strResponse)) {
           Char[] readBuff = new Char[iBufSize];
@@ -245,13 +359,10 @@ namespace FoliaEntity {
             iCount = rdThis.Read(readBuff, 0, iBufSize);
           }
         }
-        // Convert the XML reply to a processable object
-        XmlDocument pdxReply = new XmlDocument();
-        pdxReply.LoadXml(sbReply.ToString());
-        // Return the XML document
-        return pdxReply;
+        // Return the result
+        return sbReply.ToString();
       } catch (Exception e) {
-        errHandle.DoError("entity/MakeXmlPostRequest", e); // Provide standard error message
+        errHandle.DoError("entity/readResponse", e); // Provide standard error message
         return null;
       }
     }
@@ -259,6 +370,7 @@ namespace FoliaEntity {
   }
 
   public class link {
+    public String method = "";
     public String uri = "";
     public String form = "";
     public String type = "";
@@ -268,8 +380,9 @@ namespace FoliaEntity {
     public String similarityScore = "";
     public String percentageOfSecondRank = "";
     public String hit = "";
-    public link(String sUri, String sForm, String sType, String sClassmatch, String sSupport, String sOffset, 
+    public link(String sMethod, String sUri, String sForm, String sType, String sClassmatch, String sSupport, String sOffset, 
       String sSimilarityScore, String sPercentageOfSecondRank, String sHit) {
+      this.method = sMethod;
       this.uri = sUri;
       this.form = sForm;
       this.classmatch = sClassmatch;
@@ -278,6 +391,12 @@ namespace FoliaEntity {
       this.similarityScore = sSimilarityScore;
       this.percentageOfSecondRank = sPercentageOfSecondRank;
       this.hit = sHit;
+    }
+
+    public String toCsv() {
+      // Return all the elements, but make sure the HIT (boolean) is first
+      return this.hit + "\t" + this.method + "\t" + this.uri + "\t" + this.form + "\t" + this.classmatch + "\t" + this.support +
+        this.offset + "\t" + this.similarityScore + "\t" + this.percentageOfSecondRank;
     }
   }
 }

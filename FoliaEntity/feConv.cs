@@ -25,7 +25,8 @@ namespace FoliaEntity {
     /* -------------------------------------------------------------------------------------
      * Name:        ParseOneFoliaEntity
      * Goal:        Master routine to parse one folia.xml Dutch file (Sonar + Lassy)
-     * Parameters:  sFileIn     - File to be processed
+     * Parameters:  sDirIn      - Input directory
+     *              sFileIn     - File to be processed
      *              sDirOut     - Directory where the output files should come
      *              sAnnotator  - Name of the annotator
      *              bOverwrite  - Overwrite existing output or not
@@ -34,8 +35,8 @@ namespace FoliaEntity {
      * History:
      * 24/oct/2016 ERK Created
        ------------------------------------------------------------------------------------- */
-    public bool ParseOneFoliaEntity(String sFileIn, String sDirOut, String sAnnotator,
-        bool bOverwrite, bool bIsDebug, bool bKeepGarbage) {
+    public bool ParseOneFoliaEntity(String sDirIn, String sFileIn, String sDirOut, String sAnnotator,
+        bool bOverwrite, bool bIsDebug, bool bKeepGarbage, ref int iHits, ref int iFail) {
       XmlDocument pdxSent = null; // The folia input sentence
       XmlNode ndxFoliaS;          // Input FoLiA format sentence
       XmlNamespaceManager nsFolia;// Namespace manager for folia input
@@ -49,6 +50,7 @@ namespace FoliaEntity {
       List<String> lstAlpFile;    // Alpino file names
       util.xmlTools oXmlTools = new util.xmlTools(errHandle);
       String sConfidence = "0.20";
+      String sFileShort = "";     // Short file name
 
       try {
         // Validate
@@ -57,12 +59,22 @@ namespace FoliaEntity {
         if (sDirOut.EndsWith("/") || sDirOut.EndsWith("\\"))
           sDirOut = sDirOut.Substring(0, sDirOut.Length - 1);
         // Construct output file name
-        String sFileOut = sDirOut + "/" + Path.GetFileName(sFileIn);
+        sFileShort = Path.GetFileName(sFileIn);
+        String sSubDir = sDirOut;
+        if (Directory.Exists(sDirIn)) {
+          String sFileInDir = Path.GetDirectoryName(sFileIn);
+          sSubDir += sFileInDir.Substring(sDirIn.Length) ;
+        }
+        String sFileOut = Path.GetFullPath(sSubDir + "/" + sFileShort);
         this.loc_sDirOut = sDirOut;
 
         // If the output file is already there: skip it
         if (!bOverwrite && File.Exists(sFileOut)) { debug("Skip existing [" + sFileOut + "]"); return true; }
 
+        // Some kind of logging to see what is going on
+        if (bIsDebug) {
+          errHandle.Status("Input: " + sFileIn + "\nOutput: " + sFileOut);
+        }
 
         // Other initialisations
         pdxSent = new XmlDocument();
@@ -74,6 +86,9 @@ namespace FoliaEntity {
         wrSet.Indent = true;
         wrSet.NewLineHandling = NewLineHandling.Replace;
         wrSet.NamespaceHandling = NamespaceHandling.OmitDuplicates;
+        // wrSet.ConformanceLevel = ConformanceLevel.Auto;
+        iHits = 0;
+        iFail = 0;
         // wrSet.NewLineOnAttributes = true;
 
         // The 'twopass' method:
@@ -93,11 +108,18 @@ namespace FoliaEntity {
         // Make room for the intermediate results
         String sShort = Path.GetFileNameWithoutExtension(sFileOut);
         String sFileOutDir = Path.GetDirectoryName(sFileOut) + "/" + sShort;
-        String sFileOutLog = sFileOutDir + ".log";
-        if (!Directory.Exists(sFileOutDir)) Directory.CreateDirectory(sFileOutDir);
-        // Remove the last slash for clarity
-        if (sFileOutDir.EndsWith("/") || sFileOutDir.EndsWith("\\"))
-          sFileOutDir = sFileOutDir.Substring(0, sFileOutDir.Length - 1);
+        String sFileOutLog = Path.GetFullPath( sFileOutDir + ".log");
+        // Clear any previous logging
+        if (File.Exists(sFileOutLog)) {
+          // Make sure to overwrite what is there
+          File.WriteAllText(sFileOutLog, "");
+        }
+        //if (!Directory.Exists(Path.GetDirectoryName(sFileOutDir))) {
+        //  Directory.CreateDirectory(Path.GetDirectoryName(sFileOutDir));
+        //}
+        //// Remove the last slash for clarity
+        //if (sFileOutDir.EndsWith("/") || sFileOutDir.EndsWith("\\"))
+        //  sFileOutDir = sFileOutDir.Substring(0, sFileOutDir.Length - 1);
 
         // Open input file and output file
         using (rdFolia = XmlReader.Create(new StreamReader(sFileIn))) {
@@ -149,8 +171,6 @@ namespace FoliaEntity {
                   List<XmlNode> lstW = oXmlTools.FixList(ndxFoliaS.SelectNodes("./descendant::df:w/child::df:t", nsFolia));
                   // (6) preparations: retrieve the @xml:id attribute for logging
                   String sSentId = ndxFoliaS.Attributes["xml:id"].Value;
-                  // (6b) Log the fact that we are processing this sentence
-                  doOneLogLine(sFileOutLog, "s[" + iSentNum + "]: " + sSentId + "\r");
 
                   // There are one or more entities to be processed: process them one-by-one
                   for (int j = 0; j < lstEnt.Count; j++) {
@@ -163,6 +183,10 @@ namespace FoliaEntity {
                         idStart = lstEntW[k].Attributes["id"].Value;
                       } else sEntity += " ";
                       sEntity += lstEntW[k].Attributes["t"].Value;
+                    }
+                    // (6b) Log the fact that we are processing this sentence
+                    if (bIsDebug) {
+                      errHandle.Status("s[" + iSentNum + "]: " + sSentId + " [" + sEntity + "]\r");
                     }
 
                     // (7) Calculate the offset for this particular entity as well as the sentence string
@@ -186,8 +210,12 @@ namespace FoliaEntity {
                     // Create an entity object to be processed
                     String sClass = lstEnt[j].Attributes["class"].Value;
                     entity oEntity = new entity(this.errHandle, sEntity, sClass, sSent, iOffset.ToString(), idStart);
+                    oEntity.set_debug(bIsDebug);
 
                     if (oEntity.oneEntityToLinks(sConfidence)) {
+                      // Keep track of hits and failures
+                      iHits += oEntity.get_hits();
+                      iFail += oEntity.get_fail();
                       // Process the alignments that have been found
                       List<link> lstAlign = oEntity.get_links();
                       for (int k=0;k<lstAlign.Count;k++) {
@@ -206,6 +234,10 @@ namespace FoliaEntity {
                         XmlNode ndxAlignment = pdxAlign.SelectSingleNode("./descendant-or-self::df:alignment", nmsDf);
                         ndxAlignment.Attributes["xlink:href"].Value = lnkThis.uri;
                         lstEnt[j].AppendChild(pdxSrc.ImportNode(ndxAlignment, true));
+
+                        // Process logging output
+                        String sLogMsg = sFileShort + "\t" + sSentId + "\t" + sClass + "\t" + lnkThis.toCsv();
+                        doOneLogLine(sFileOutLog, sLogMsg);
                       }
                     }
 
@@ -214,14 +246,25 @@ namespace FoliaEntity {
 
 
                 // (10) Write the new <s> node to the writer
-                XmlReader rdResult = XmlReader.Create(new StringReader(ndxFoliaS.SelectSingleNode("./descendant-or-self::df:s", nsFolia).OuterXml));
-                wrFolia.WriteNode(rdResult, true);
-                // wrFolia.WriteString("\n");
+                XmlReader rdResult = null;
+                try {
+                  rdResult = XmlReader.Create(new StringReader(ndxFoliaS.SelectSingleNode("./descendant-or-self::df:s", nsFolia).OuterXml));
+                  wrFolia.WriteNode(rdResult, true);
+                  // wrFolia.WriteString("\n");
+                } catch (Exception ex) {
+                  errHandle.DoError("ParseOneFoliaEntity", ex); // Provide standard error message
+                  return false;
+                }
                 wrFolia.Flush();
                 rdResult.Close();
               } else {
                 // Just write it out
-                WriteShallowNode(rdFolia, wrFolia);
+                try {
+                  WriteShallowNode(rdFolia, wrFolia);
+                } catch (Exception ex) {
+                  errHandle.DoError("ParseOneFoliaEntity", ex); // Provide standard error message
+                  return false;
+                }
               }
             }
             // Finish reading input
@@ -231,14 +274,15 @@ namespace FoliaEntity {
             wrFolia.Close();
             wrFolia = null;
           }
+          wrText.Close();
         }
 
         //  Garbage collection
         if (!bKeepGarbage) {
-          // Clean-up: remove temporary files as well as temporary directory
-          Directory.Delete(sFileOutDir, true);
+          //// Clean-up: remove temporary files as well as temporary directory
+          //Directory.Delete(sFileOutDir, true);
           // Clean-up: remove the .log file
-          File.Delete(sFileOutDir + ".log");
+          File.Delete(sFileOutLog);
         }
 
 
@@ -256,7 +300,7 @@ namespace FoliaEntity {
     /// <param name="sFileOutLog"></param>
     /// <param name="sLogMsg"></param>
     private void doOneLogLine(String sFileOutLog, String sLogMsg) {
-      errHandle.Status(sLogMsg + "\n");
+      // errHandle.Status(sLogMsg + "\r");
       File.AppendAllText(sFileOutLog, sLogMsg + "\n");
     }
 
