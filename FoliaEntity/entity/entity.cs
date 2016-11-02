@@ -19,6 +19,7 @@ namespace FoliaEntity {
     // ========================================== LOCAL VARIABLES ==============================================
     private String sApiStart = "http://spotlight.sztaki.hu:2232/rest/";
     private String sApiLotus = "http://lotus.lodlaundromat.org/retrieve/";
+    private String sApiFlask = "http://flask.fii800.lod.labs.vu.nl";
     private int iBufSize = 1024;        // Buffer size
     private string strNs = "";          // Possible namespace URI
     private ErrHandle errHandle;        // Our own copy of the error handle
@@ -75,6 +76,9 @@ namespace FoliaEntity {
           // Give it another go: try the 'annotate' method
           bResult = this.oneSpotlightRequest("annotate", sConfidence, ref loc_lstLinks);
         }
+
+        // Add a FLASK request
+        bool bFlask = this.oneFlaskRequest(sConfidence, ref loc_lstLinks);
 
         // Add a LOTUS request
         bool bLotus = this.oneLotusRequest(sConfidence, ref loc_lstLinks);
@@ -234,6 +238,103 @@ namespace FoliaEntity {
 
     }
 
+/* -------------------------------------------------------------------------------------
+ * Name:        oneFlaskRequest
+ * Goal:        Perform one request to SPOTLIGHT
+ * Parameters:  sConfidence - Minimal level of confidence that should be met
+ *              lstLinks    - List of 'link' objects
+ * History:
+ * 2/nov/2016 ERK Created
+   ------------------------------------------------------------------------------------- */
+    private bool oneFlaskRequest(String sConfidence, ref List<link> lstLinks) {
+      String sRdfPost = "";
+      String sData = "";
+      XmlWriterSettings wrSet = new XmlWriterSettings();
+
+      try {
+        sRdfPost = File.ReadAllText(@"D:\Data Files\TG\writable\example.rdf");
+        sData = HttpUtility.UrlEncode(sRdfPost, Encoding.UTF8);
+
+        // Make a request
+        XmlDocument pdxReply = MakeXmlPostRequest(sApiFlask, "", sData);
+
+        // Check the reply and process it
+        if (pdxReply != null) {
+          // Find a list of all <Resource> answers
+          XmlNodeList lstResources = pdxReply.SelectNodes("./descendant::Resource");
+          for (int i = 0; i < lstResources.Count; i++) {
+            // Get access to this resource
+            XmlNode resThis = lstResources[i];
+            // Get the kind of web service used
+            String sService = "flask";
+            if (resThis.Attributes["service"] != null)
+              sService = resThis.Attributes["service"].Value;
+            // Calculate 'found' and 'classmatch'
+            String eClass = this.loc_sClass;
+            String resType = resThis.Attributes["types"].Value;
+            String sClassMatch = "no";
+            String sHit = "";
+            bool bFound = false;
+            switch (eClass) {
+              case "loc":   // location
+                if (resType == "" || resType.Contains(":Place")) { bFound = true; sClassMatch = "yes"; }
+                break;
+              case "org":   // organization
+                if (resType == "" || resType.Contains("Organization") || resType.Contains("Organisation")) { bFound = true; sClassMatch = "yes"; }
+                break;
+              case "pro":   // product
+                if (resType == "" || resType.Contains(":Language")) { bFound = true; sClassMatch = "yes"; }
+                break;
+              case "per":   // person
+                if (resType == "" || resType.Contains(":Agent")) { bFound = true; sClassMatch = "yes"; }
+                break;
+              case "misc":  // miscellaneous
+                bFound = true; sClassMatch = "misc";
+                break;
+              default:      // Anything else
+                if (resType == "") { bFound = true; sClassMatch = "empty"; }
+                break;
+            }
+
+            // Do we have a hit?
+            if (bFound) {
+              this.loc_iHits++; sHit = "true";
+            } else {
+              this.loc_iFail++; sHit = "false";
+            }
+
+            // Create a link object
+            link oLink = new link(sService, "",
+              resThis.Attributes["URI"].Value,
+              resThis.Attributes["surfaceForm"].Value,
+              resThis.Attributes["types"].Value,
+              sClassMatch,
+              resThis.Attributes["support"].Value,
+              resType,
+              resThis.Attributes["similarityScore"].Value,
+              resThis.Attributes["percentageOfSecondRank"].Value,
+              sHit);
+            // Add the link object to the list of what is returned
+            lstLinks.Add(oLink);
+
+            // ================ DEBUG ===============
+            //if (this.loc_sEntity.Contains("Vlaanderen")) {
+            //  int j = 0;
+            //}
+            // ======================================
+
+          }
+        }
+
+        // Be positive
+        return true;
+      } catch (Exception ex) {
+        errHandle.DoError("entity/oneFlaskRequest", ex); // Provide standard error message
+        return false;
+      }
+
+    }
+
     /* -------------------------------------------------------------------------------------
      * Name:        oneLotusRequest
      * Goal:        Perform one request to SPOTLIGHT
@@ -357,8 +458,28 @@ namespace FoliaEntity {
 
         HttpWebRequest request = null;
         // Set the method correctly
-        if (sUrlStart.ToLower().Contains("spotlight")) {
+        if (sUrlStart.ToLower().Contains("lotus")) {
           // Create a request
+          request = (HttpWebRequest)WebRequest.Create(sRequest + "?" + sData);
+          request.Method = "GET";
+          request.ContentType = "application/x-www-form-urlencoded";
+          request.Accept = "application/json";
+          sReturnLanguage = "json";
+        } else if (sUrlStart.ToLower().Contains("flask")) {
+          // Create a request and expect XML response
+          request = (HttpWebRequest)WebRequest.Create(sRequest);
+          request.Method = "POST";
+          request.ContentLength = postBytes.Length;
+          request.ContentType = "application/x-www-form-urlencoded";
+          request.Accept = "rdf/xml";
+          sReturnLanguage = "rdf";
+
+          Stream dataStream = request.GetRequestStream();
+          // Write the data to the request stream
+          dataStream.Write(postBytes, 0, postBytes.Length);
+          dataStream.Close();
+        } else {
+          // Create a request and expect XML response
           request = (HttpWebRequest)WebRequest.Create(sRequest);
           request.Method = "POST";
           request.ContentLength = postBytes.Length;
@@ -370,14 +491,6 @@ namespace FoliaEntity {
           // Write the data to the request stream
           dataStream.Write(postBytes, 0, postBytes.Length);
           dataStream.Close();
-
-        } else {
-          // Create a request
-          request = (HttpWebRequest)WebRequest.Create(sRequest + "?" + sData);
-          request.Method = "GET";
-          request.ContentType = "application/x-www-form-urlencoded";
-          request.Accept = "application/json";
-          sReturnLanguage = "json";
         }
 
         // Get a response
