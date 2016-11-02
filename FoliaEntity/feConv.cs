@@ -114,12 +114,6 @@ namespace FoliaEntity {
           // Make sure to overwrite what is there
           File.WriteAllText(sFileOutLog, "");
         }
-        //if (!Directory.Exists(Path.GetDirectoryName(sFileOutDir))) {
-        //  Directory.CreateDirectory(Path.GetDirectoryName(sFileOutDir));
-        //}
-        //// Remove the last slash for clarity
-        //if (sFileOutDir.EndsWith("/") || sFileOutDir.EndsWith("\\"))
-        //  sFileOutDir = sFileOutDir.Substring(0, sFileOutDir.Length - 1);
 
         // Open input file and output file
         using (rdFolia = XmlReader.Create(new StreamReader(sFileIn))) {
@@ -221,10 +215,10 @@ namespace FoliaEntity {
                       for (int k=0;k<lstAlign.Count;k++) {
                         // Process this link
                         link lnkThis = lstAlign[k];
-                        // TODO: convert this link into an <alignment> thing and add it to the current <entity>
+                        // Convert this link into an <alignment> item and add it to the current <entity>
                         XmlDocument pdxAlign = new XmlDocument();
                         String sAlignModel = "<FoLiA xmlns:xlink='http://www.w3.org/1999/xlink' xmlns='http://ilk.uvt.nl/folia'>" +
-                          "<s><alignment format='application/json' class='NEL' xlink:href='' xlink:type='simple'></alignment>" +
+                          "<s><alignment format='application/json' class='NEL' xlink:href='' xlink:type='simple' src=''></alignment>" +
                           "</s></FoLiA>";
                         pdxAlign.LoadXml(sAlignModel);
                         // Set up a namespace manager for folia
@@ -233,6 +227,7 @@ namespace FoliaEntity {
 
                         XmlNode ndxAlignment = pdxAlign.SelectSingleNode("./descendant-or-self::df:alignment", nmsDf);
                         ndxAlignment.Attributes["xlink:href"].Value = lnkThis.uri;
+                        ndxAlignment.Attributes["src"].Value = lnkThis.service;
                         lstEnt[j].AppendChild(pdxSrc.ImportNode(ndxAlignment, true));
 
                         // Process logging output

@@ -18,6 +18,7 @@ namespace FoliaEntity {
     // 24/oct/2016 ERK Created
     // ========================================== LOCAL VARIABLES ==============================================
     private String sApiStart = "http://spotlight.sztaki.hu:2232/rest/";
+    private String sApiLotus = "http://lotus.lodlaundromat.org/retrieve/";
     private int iBufSize = 1024;        // Buffer size
     private string strNs = "";          // Possible namespace URI
     private ErrHandle errHandle;        // Our own copy of the error handle
@@ -31,6 +32,10 @@ namespace FoliaEntity {
     private int loc_iFail = 0;
     private List<link> loc_lstLinks = null; // Resulting links
     private String loc_sReqModel = "<annotation text=''><surfaceForm name='' offset='' /></annotation>";
+    private String loc_sRespModel = 
+      "<?xml version='1.0' encoding='utf-8'?><Annotation><Resources>" + 
+      "<Resource service='' URI='' support='' types='' surfaceForm='' offset='' similarityScore='' percentageOfSecondRank='' />" + 
+      "</Resources></Annotation>";
     private Regex regHref = new Regex("(href=['\"]?)([^'\"]+)");
     private bool bDebug = false;        // Debugging set or not
     // =========================================================================================================
@@ -64,12 +69,17 @@ namespace FoliaEntity {
         // Initialize the return list
         this.loc_lstLinks = new List<link>();
 
-        // Try making a disambiguation spotlight request
+        // Try making a disambiguation SPOTLIGHT request
         bool bResult = this.oneSpotlightRequest("disambiguate", sConfidence, ref loc_lstLinks);
         if(!bResult) {
           // Give it another go: try the 'annotate' method
           bResult = this.oneSpotlightRequest("annotate", sConfidence, ref loc_lstLinks);
         }
+
+        // Add a LOTUS request
+        bool bLotus = this.oneLotusRequest(sConfidence, ref loc_lstLinks);
+        // Possibly adapt the result boolean
+        if (!bResult) bResult = bLotus;
 
         // Return what we found
         return bResult;
@@ -141,10 +151,10 @@ namespace FoliaEntity {
         sData = "confidence=" + sConfidence + "&text=" + HttpUtility.UrlEncode(sXmlPost, Encoding.UTF8);
 
         // Make a request
-        XmlDocument pdxReply = MakeXmlPostRequest(sMethod, sData);
+        XmlDocument pdxReply = MakeXmlPostRequest(sApiStart, sMethod, sData);
         if (pdxReply == null) {
           // Try to get a reply from the HTML
-          pdxReply = MakeHtmlPostRequest(sMethod, sData, this.loc_sEntity);
+          pdxReply = MakeHtmlPostRequest(sApiStart, sMethod, sData, this.loc_sEntity);
         }
 
         // Check the reply and process it
@@ -152,6 +162,114 @@ namespace FoliaEntity {
           // Find a list of all <Resource> answers
           XmlNodeList lstResources = pdxReply.SelectNodes("./descendant::Resource");
           for (int i=0;i<lstResources.Count;i++) {
+            // Get access to this resource
+            XmlNode resThis = lstResources[i];
+            // Get the kind of web service used
+            String sService = "spotlight";
+            if (resThis.Attributes["service"] != null)
+              sService = resThis.Attributes["service"].Value;
+            // Calculate 'found' and 'classmatch'
+            String eClass = this.loc_sClass;
+            String resType = resThis.Attributes["types"].Value;
+            String sClassMatch = "no";
+            String sHit = "";
+            bool bFound = false;
+            switch (eClass) {
+              case "loc":   // location
+                if (resType == "" || resType.Contains(":Place")) { bFound = true; sClassMatch = "yes"; }
+                break;
+              case "org":   // organization
+                if (resType == "" || resType.Contains("Organization") || resType.Contains("Organisation")) { bFound = true; sClassMatch = "yes"; }
+                break;
+              case "pro":   // product
+                if (resType == "" || resType.Contains(":Language")) { bFound = true; sClassMatch = "yes"; }
+                break;
+              case "per":   // person
+                if (resType == "" || resType.Contains(":Agent")) { bFound = true; sClassMatch = "yes"; }
+                break;
+              case "misc":  // miscellaneous
+                bFound = true; sClassMatch = "misc";
+                break;
+              default:      // Anything else
+                if (resType == "") { bFound = true; sClassMatch = "empty"; }
+                break;
+            }
+
+            // Do we have a hit?
+            if (bFound) {
+              this.loc_iHits++; sHit = "true";
+            } else {
+              this.loc_iFail++; sHit = "false";
+            }
+
+            // Create a link object
+            link oLink = new link(sService, sMethod,
+              resThis.Attributes["URI"].Value,
+              resThis.Attributes["surfaceForm"].Value, 
+              resThis.Attributes["types"].Value,
+              sClassMatch, 
+              resThis.Attributes["support"].Value, 
+              resType,
+              resThis.Attributes["similarityScore"].Value, 
+              resThis.Attributes["percentageOfSecondRank"].Value,
+              sHit);
+            // Add the link object to the list of what is returned
+            lstLinks.Add(oLink);
+
+            // ================ DEBUG ===============
+            //if (this.loc_sEntity.Contains("Vlaanderen")) {
+            //  int j = 0;
+            //}
+            // ======================================
+
+          }
+        }
+
+        // Be positive
+        return true;
+      } catch (Exception ex) {
+        errHandle.DoError("entity/oneSpotlightRequest", ex); // Provide standard error message
+        return false;
+      }
+
+    }
+
+    /* -------------------------------------------------------------------------------------
+     * Name:        oneLotusRequest
+     * Goal:        Perform one request to SPOTLIGHT
+     * Parameters:  sConfidence - Minimal level of confidence that should be met
+     *              lstLinks    - List of 'link' objects
+     * History:
+     * 2/nov/2016 ERK Created
+       ------------------------------------------------------------------------------------- */
+    private bool oneLotusRequest(String sConfidence, ref List<link> lstLinks) {
+      String sXmlPost = "";
+      String sMethod = "";
+      String sData = "";
+      XmlWriterSettings wrSet = new XmlWriterSettings();
+
+      try {
+        // Prepare the data for the post request
+        sData = "string=" + HttpUtility.UrlEncode(this.loc_sEntity, Encoding.UTF8) + 
+                "&match=fuzzyconjunct&rank=lengthnorm&predicate=label&uniq=true&langtag=nl";
+
+        // Make a request
+        XmlDocument pdxReply = MakeXmlPostRequest(sApiLotus, sMethod, sData);
+
+        // Preliminary check of Lotus results
+        if (pdxReply != null && pdxReply.SelectSingleNode("./descendant::Resource").Attributes["uri"].Value == "") {
+          // Provide one alternative
+          String sDataAlternative = "string=" + HttpUtility.UrlEncode(this.loc_sEntity, Encoding.UTF8) +
+                  "&match=fuzzyconjunct&rank=lengthnorm&uniq=true&langtag=nl";
+          // Make an alternative request
+          pdxReply = MakeXmlPostRequest(sApiLotus, sMethod, sDataAlternative);
+        }
+
+        // Check the reply and process it
+        if (pdxReply != null) {
+          // Find a list of all <Resource> answers
+          XmlNodeList lstResources = pdxReply.SelectNodes("./descendant::Resource");
+          for (int i = 0; i < lstResources.Count; i++) {
             // Get access to this resource
             XmlNode resThis = lstResources[i];
             // Calculate 'found' and 'classmatch'
@@ -189,24 +307,21 @@ namespace FoliaEntity {
             }
 
             // Create a link object
-            link oLink = new link(sMethod,
+            link oLink = new link("lotus", sMethod,
               resThis.Attributes["URI"].Value,
-              resThis.Attributes["surfaceForm"].Value, 
+              resThis.Attributes["surfaceForm"].Value,
               resThis.Attributes["types"].Value,
-              sClassMatch, 
-              resThis.Attributes["support"].Value, 
+              sClassMatch,
+              resThis.Attributes["support"].Value,
               resType,
-              resThis.Attributes["similarityScore"].Value, 
+              resThis.Attributes["similarityScore"].Value,
               resThis.Attributes["percentageOfSecondRank"].Value,
               sHit);
-            // Add the link object to the list of what is returned
-            lstLinks.Add(oLink);
-
-            // ================ DEBUG ===============
-            //if (this.loc_sEntity.Contains("Vlaanderen")) {
-            //  int j = 0;
-            //}
-            // ======================================
+            // Should we add this?
+            if (lstLinks.Count == 0 || (lstLinks.Count>0 && lstLinks[0].uri != oLink.uri && oLink.uri != "")) {
+              // Add the link object to the list of what is returned
+              lstLinks.Add(oLink);
+            }
 
           }
         }
@@ -214,7 +329,7 @@ namespace FoliaEntity {
         // Be positive
         return true;
       } catch (Exception ex) {
-        errHandle.DoError("entity/oneSpotlightRequest", ex); // Provide standard error message
+        errHandle.DoError("entity/oneLotusRequest", ex); // Provide standard error message
         return false;
       }
 
@@ -229,30 +344,41 @@ namespace FoliaEntity {
      * History:
      * 24/oct/2016 ERK Created
        ------------------------------------------------------------------------------------- */
-    private XmlDocument MakeXmlPostRequest(String sMethod, String sData) {
+    private XmlDocument MakeXmlPostRequest(String sUrlStart, String sMethod, String sData) {
+      String sReturnLanguage = "";
+
       try {
         // Prepare the data
         ASCIIEncoding ascii = new ASCIIEncoding();
         byte[] postBytes = ascii.GetBytes(sData.ToString());
 
         // Create the request string
-        String sRequest = sApiStart + sMethod.ToLower();
+        String sRequest = sUrlStart + sMethod.ToLower();
 
-        // Create a request
-        HttpWebRequest request = (HttpWebRequest) WebRequest.Create(sRequest);
+        HttpWebRequest request = null;
         // Set the method correctly
-        request.Method = "POST";
-        request.ContentLength = postBytes.Length;
-        request.ContentType = "application/x-www-form-urlencoded";
-        request.Accept = "text/xml";
+        if (sUrlStart.ToLower().Contains("spotlight")) {
+          // Create a request
+          request = (HttpWebRequest)WebRequest.Create(sRequest);
+          request.Method = "POST";
+          request.ContentLength = postBytes.Length;
+          request.ContentType = "application/x-www-form-urlencoded";
+          request.Accept = "text/xml";
+          sReturnLanguage = "xml";
 
-        Stream dataStream = request.GetRequestStream();
-        // Write the data to the request stream
-        dataStream.Write(postBytes, 0, postBytes.Length);
-        dataStream.Close();
+          Stream dataStream = request.GetRequestStream();
+          // Write the data to the request stream
+          dataStream.Write(postBytes, 0, postBytes.Length);
+          dataStream.Close();
 
-        //// Set the header such a way that an XML reply is expected
-        //request.Headers.Add(HttpRequestHeader.Accept, "text/xml");
+        } else {
+          // Create a request
+          request = (HttpWebRequest)WebRequest.Create(sRequest + "?" + sData);
+          request.Method = "GET";
+          request.ContentType = "application/x-www-form-urlencoded";
+          request.Accept = "application/json";
+          sReturnLanguage = "json";
+        }
 
         // Get a response
         HttpWebResponse response = null;
@@ -268,9 +394,37 @@ namespace FoliaEntity {
         }
         // Process the result: get it as a string
         sReply = readResponse(ref response);
-        // Convert the XML reply to a processable object
         XmlDocument pdxReply = new XmlDocument();
-        pdxReply.LoadXml(sReply);
+        // Processing depends on the type
+        switch (sReturnLanguage) {
+          case "xml":
+            // Convert the XML reply to a processable object
+            pdxReply.LoadXml(sReply);
+            break;
+          case "json":
+            LotusResponse oLotus = Newtonsoft.Json.JsonConvert.DeserializeObject<LotusResponse>(sReply);
+            // Pre-load a response
+            pdxReply.LoadXml(loc_sRespModel);
+            // Find the correct node
+            XmlNode ndxResource = pdxReply.SelectSingleNode("./descendant::Resource[1]");
+            // Sanity check
+            if (ndxResource != null) {
+              // Do we actually have results?
+              if (oLotus != null && oLotus.numhits>0) {
+                // Fill in the values of this node
+                LotusHit oHit = oLotus.hits[0];  // Take the first hit
+                ndxResource.Attributes["service"].Value = "lotus";
+                ndxResource.Attributes["URI"].Value = oHit.subject;
+                ndxResource.Attributes["support"].Value = "1";
+                ndxResource.Attributes["types"].Value = "";
+                ndxResource.Attributes["surfaceForm"].Value = this.loc_sEntity;
+                ndxResource.Attributes["offset"].Value = "0";
+                ndxResource.Attributes["similarityScore"].Value = "1.0";
+                ndxResource.Attributes["percentageOfSecondRank"].Value = "0.0";
+              }
+            }
+            break;
+        }
         // Return the XML document
         return pdxReply;
       } catch (Exception e) {
@@ -288,14 +442,14 @@ namespace FoliaEntity {
      * History:
      * 24/oct/2016 ERK Created
        ------------------------------------------------------------------------------------- */
-    private XmlDocument MakeHtmlPostRequest(String sMethod, String sData, String sEntity) {
+    private XmlDocument MakeHtmlPostRequest(String sUrlStart, String sMethod, String sData, String sEntity) {
       try {
         // Prepare the data
         ASCIIEncoding ascii = new ASCIIEncoding();
         byte[] postBytes = ascii.GetBytes(sData.ToString());
 
         // Create the request string
-        String sRequest = sApiStart + sMethod.ToLower();
+        String sRequest = sUrlStart + sMethod.ToLower();
 
         // Create a request
         HttpWebRequest request = (HttpWebRequest)WebRequest.Create(sRequest);
@@ -370,7 +524,8 @@ namespace FoliaEntity {
   }
 
   public class link {
-    public String method = "";
+    public String service = "";                 // Kind of web service that has been used
+    public String method = "";                  // Method used within the web service
     public String uri = "";
     public String form = "";
     public String type = "";
@@ -380,8 +535,9 @@ namespace FoliaEntity {
     public String similarityScore = "";
     public String percentageOfSecondRank = "";
     public String hit = "";
-    public link(String sMethod, String sUri, String sForm, String sType, String sClassmatch, String sSupport, String sOffset, 
+    public link(String sService, String sMethod, String sUri, String sForm, String sType, String sClassmatch, String sSupport, String sOffset, 
       String sSimilarityScore, String sPercentageOfSecondRank, String sHit) {
+      this.service = sService;
       this.method = sMethod;
       this.uri = sUri;
       this.form = sForm;
@@ -395,8 +551,31 @@ namespace FoliaEntity {
 
     public String toCsv() {
       // Return all the elements, but make sure the HIT (boolean) is first
-      return this.hit + "\t" + this.method + "\t" + this.uri + "\t" + this.form + "\t" + this.classmatch + "\t" + this.support +
+      return this.hit + "\t" + this.service + "\t" + this.method + "\t" + this.uri + "\t" + this.form + "\t" + 
+        this.classmatch + "\t" + this.support +
         this.offset + "\t" + this.similarityScore + "\t" + this.percentageOfSecondRank;
     }
   }
+
+  public class LotusHit {
+    public String subject;
+    public String predicate;
+    public String sTring;
+    public String langtag;
+    public String docid;
+    public long timestamp;
+    public double tr;
+    public double sr;
+    public double length;
+    public int r2d;
+    public int degree;
+  }
+  public class LotusResponse {
+    public int took;
+    public int numhits;
+    public int returned;
+    public LotusHit[] hits;
+  }
+
 }
+
