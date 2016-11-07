@@ -1,6 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Collections.Specialized;
+using VDS.RDF;
+using VDS.RDF.Writing;
+using VDS.RDF.Parsing;
 using System.Net;
 using System.Xml;
 using System.Web;
@@ -77,9 +80,6 @@ namespace FoliaEntity {
           bResult = this.oneSpotlightRequest("annotate", sConfidence, ref loc_lstLinks);
         }
 
-        // Add a FLASK request
-        bool bFlask = this.oneFlaskRequest(sConfidence, ref loc_lstLinks);
-
         // Add a LOTUS request
         bool bLotus = this.oneLotusRequest(sConfidence, ref loc_lstLinks);
         // Possibly adapt the result boolean
@@ -89,6 +89,39 @@ namespace FoliaEntity {
         return bResult;
       } catch (Exception ex) {
         errHandle.DoError("entity/oneEntityToLinks", ex); // Provide standard error message
+        return false;
+      }
+    }
+
+    /* -------------------------------------------------------------------------------------
+     * Name:        docEntityToLinks
+     * Goal:        Find all links of one document in one go
+     * Parameters:  sDocText    - Text of the whole document
+     *              lstEntExpr  - List of named entities
+     *              lstEntOffset- List of offsets of the entities within [sDocText]
+     *              lstEntLink  - Resulting list of entity links
+     * History:
+     * 7/nov/2016 ERK Created
+       ------------------------------------------------------------------------------------- */
+    public bool docEntityToLinks(String sDocText, List<String> lstEntExpr, List<int> lstEntOffset, ref List<link> lstEntLink) {
+      bool bResult = true;
+
+      try {
+        // Clear the results
+        lstEntLink.Clear();
+
+        // Create a FLASK request
+        bool bFlask = this.oneFlaskRequest(sDocText, lstEntExpr, lstEntOffset, ref loc_lstLinks);
+
+        // Process the answer
+        if (bFlask) {
+          lstEntLink = loc_lstLinks;
+        }
+
+        // Return what we found
+        return bResult;
+      } catch (Exception ex) {
+        errHandle.DoError("entity/docEntityToLinks", ex); // Provide standard error message
         return false;
       }
     }
@@ -130,7 +163,7 @@ namespace FoliaEntity {
             // Convert the xml document to a string
             wrSet.OmitXmlDeclaration = true;
             wrSet.Encoding = Encoding.UTF8;
-            using (var stringWriter = new StringWriter())
+            using (var stringWriter = new System.IO.StringWriter())
               using (var xmlTextWriter = XmlWriter.Create(stringWriter, wrSet)) {
               pdxData.WriteTo(xmlTextWriter);
               xmlTextWriter.Flush();
@@ -238,22 +271,32 @@ namespace FoliaEntity {
 
     }
 
-/* -------------------------------------------------------------------------------------
- * Name:        oneFlaskRequest
- * Goal:        Perform one request to SPOTLIGHT
- * Parameters:  sConfidence - Minimal level of confidence that should be met
- *              lstLinks    - List of 'link' objects
- * History:
- * 2/nov/2016 ERK Created
-   ------------------------------------------------------------------------------------- */
-    private bool oneFlaskRequest(String sConfidence, ref List<link> lstLinks) {
+    /* -------------------------------------------------------------------------------------
+     * Name:        oneFlaskRequest
+     * Goal:        Perform one request to SPOTLIGHT
+     * 
+     * Parameters:  sDocText    - Text of the whole document
+     *              lstEntExpr  - List of named entities
+     *              lstEntOffset- List of offsets of the entities within [sDocText]
+     *              lstLinks    - List of 'link' objects (returned from us)
+     * History:
+     * 2/nov/2016 ERK Created
+       ------------------------------------------------------------------------------------- */
+    private bool oneFlaskRequest(String sDocText, List<String> lstEntExpr, List<int> lstEntOffset, ref List<link> lstLinks) {
       String sRdfPost = "";
       String sData = "";
       XmlWriterSettings wrSet = new XmlWriterSettings();
 
       try {
-        sRdfPost = File.ReadAllText(@"D:\Data Files\TG\writable\example.rdf");
-        sData = HttpUtility.UrlEncode(sRdfPost, Encoding.UTF8);
+        // TEST: load the data from stored example.rdf
+        // sRdfPost = File.ReadAllText(@"D:\Data Files\TG\writable\example.rdf");
+        // turtle oTurtle = new turtle(errHandle, loc_sEntity, Int32.Parse(loc_sOffset), loc_sSent);
+
+        // PRODUCTION: load the data from the information provided
+        turtle oTurtle = new turtle(errHandle, sDocText, lstEntExpr, lstEntOffset);
+        sRdfPost = oTurtle.create();
+        // NOTE: do not perform URL encoding
+        sData = sRdfPost;
 
         // Make a request
         XmlDocument pdxReply = MakeXmlPostRequest(sApiFlask, "", sData);
@@ -358,7 +401,7 @@ namespace FoliaEntity {
         XmlDocument pdxReply = MakeXmlPostRequest(sApiLotus, sMethod, sData);
 
         // Preliminary check of Lotus results
-        if (pdxReply != null && pdxReply.SelectSingleNode("./descendant::Resource").Attributes["uri"].Value == "") {
+        if (pdxReply != null && pdxReply.SelectSingleNode("./descendant::Resource").Attributes["URI"].Value == "") {
           // Provide one alternative
           String sDataAlternative = "string=" + HttpUtility.UrlEncode(this.loc_sEntity, Encoding.UTF8) +
                   "&match=fuzzyconjunct&rank=lengthnorm&uniq=true&langtag=nl";
@@ -367,7 +410,7 @@ namespace FoliaEntity {
         }
 
         // Check the reply and process it
-        if (pdxReply != null) {
+        if (pdxReply != null && pdxReply.SelectSingleNode("./descendant::Resource").Attributes["URI"].Value != "") {
           // Find a list of all <Resource> answers
           XmlNodeList lstResources = pdxReply.SelectNodes("./descendant::Resource");
           for (int i = 0; i < lstResources.Count; i++) {
@@ -447,12 +490,9 @@ namespace FoliaEntity {
        ------------------------------------------------------------------------------------- */
     private XmlDocument MakeXmlPostRequest(String sUrlStart, String sMethod, String sData) {
       String sReturnLanguage = "";
+      byte[] postBytes;
 
       try {
-        // Prepare the data
-        ASCIIEncoding ascii = new ASCIIEncoding();
-        byte[] postBytes = ascii.GetBytes(sData.ToString());
-
         // Create the request string
         String sRequest = sUrlStart + sMethod.ToLower();
 
@@ -466,12 +506,15 @@ namespace FoliaEntity {
           request.Accept = "application/json";
           sReturnLanguage = "json";
         } else if (sUrlStart.ToLower().Contains("flask")) {
+          // Prepare the data 
+          postBytes = (new UTF8Encoding()).GetBytes(sData.ToString());
           // Create a request and expect XML response
           request = (HttpWebRequest)WebRequest.Create(sRequest);
           request.Method = "POST";
           request.ContentLength = postBytes.Length;
           request.ContentType = "application/x-www-form-urlencoded";
-          request.Accept = "rdf/xml";
+          request.Accept = "*/*";
+          request.Timeout = 500000; // 500,000 milliseconds = 500 seconds = 
           sReturnLanguage = "rdf";
 
           Stream dataStream = request.GetRequestStream();
@@ -479,6 +522,10 @@ namespace FoliaEntity {
           dataStream.Write(postBytes, 0, postBytes.Length);
           dataStream.Close();
         } else {
+          // Prepare the data
+          ASCIIEncoding ascii = new ASCIIEncoding();
+          postBytes = ascii.GetBytes(sData.ToString());
+
           // Create a request and expect XML response
           request = (HttpWebRequest)WebRequest.Create(sRequest);
           request.Method = "POST";
@@ -486,6 +533,12 @@ namespace FoliaEntity {
           request.ContentType = "application/x-www-form-urlencoded";
           request.Accept = "text/xml";
           sReturnLanguage = "xml";
+
+          // Is this a HTTPS request?
+          if (sUrlStart.StartsWith("https")) {
+            ServicePointManager.ServerCertificateValidationCallback =
+              new System.Net.Security.RemoteCertificateValidationCallback(AcceptAllCertifications);
+          }
 
           Stream dataStream = request.GetRequestStream();
           // Write the data to the request stream
@@ -536,6 +589,8 @@ namespace FoliaEntity {
                 ndxResource.Attributes["percentageOfSecondRank"].Value = "0.0";
               }
             }
+            break;
+          case "rdf":
             break;
         }
         // Return the XML document
@@ -634,6 +689,13 @@ namespace FoliaEntity {
       }
     }
 
+    private bool AcceptAllCertifications(object sender, 
+      System.Security.Cryptography.X509Certificates.X509Certificate certification, 
+      System.Security.Cryptography.X509Certificates.X509Chain chain, 
+      System.Net.Security.SslPolicyErrors sslPolicyErrors) {
+      return true;
+    }
+
   }
 
   public class link {
@@ -688,6 +750,272 @@ namespace FoliaEntity {
     public int numhits;
     public int returned;
     public LotusHit[] hits;
+  }
+
+  public class turtleItem {
+    public String text;  // The text of the item
+    public int offset;   // The offset of the item within the context
+    public turtleItem(String sText, int iOffset) {
+      this.text = sText;
+      this.offset = iOffset;
+    }
+  }
+  public class turtle {
+    public List<turtleItem> lstItem;  // Array of items within the context
+    public String context;            // The context for the request
+    public ErrHandle errHandle;       // Own copy of error handler for error communication
+    public String sLanguage = "nl";   // Default language
+    private IGraph g = new Graph();   // Required graph
+    private String loc_sModel = 
+      "<?xml version='1.0' encoding='UTF-8'?>" +
+      "<rdf:RDF" +
+      "   xmlns:nif='http://persistence.uni-leipzig.org/nlp2rdf/ontologies/nif-core#'" +
+      "   xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#'" +
+      ">" +
+      "  <rdf:Description rdf:about='http://www.aksw.org/gerbil/NifWebService/request_0#char=0,1'>" +
+      "    <rdf:type rdf:resource='http://persistence.uni-leipzig.org/nlp2rdf/ontologies/nif-core#RFC5147String'/>" +
+      "    <rdf:type rdf:resource='http://persistence.uni-leipzig.org/nlp2rdf/ontologies/nif-core#String'/>" +
+      "    <nif:endIndex rdf:datatype='http://www.w3.org/2001/XMLSchema#nonNegativeInteger'>1</nif:endIndex>" +
+      "    <rdf:type rdf:resource='http://persistence.uni-leipzig.org/nlp2rdf/ontologies/nif-core#Phrase'/>" +
+      "    <nif:beginIndex rdf:datatype='http://www.w3.org/2001/XMLSchema#nonNegativeInteger'>0</nif:beginIndex>" +
+      "    <nif:lang rdf:datatype='http://www.w3.org/2001/XMLSchema#string'>nl</nif:lang>" +
+      "    <nif:anchorOf rdf:datatype='http://www.w3.org/2001/XMLSchema#string'>-</nif:anchorOf>" +
+      "    <nif:referenceContext rdf:resource='http://www.aksw.org/gerbil/NifWebService/request_0#char=0,1'/>" +
+      "  </rdf:Description>" +
+      "  <rdf:Description rdf:about='http://www.aksw.org/gerbil/NifWebService/request_0#char=0,1'>" +
+      "    <rdf:type rdf:resource='http://persistence.uni-leipzig.org/nlp2rdf/ontologies/nif-core#String'/>" +
+      "    <nif:beginIndex rdf:datatype='http://www.w3.org/2001/XMLSchema#nonNegativeInteger'>0</nif:beginIndex>" +
+      "    <rdf:type rdf:resource='http://persistence.uni-leipzig.org/nlp2rdf/ontologies/nif-core#RFC5147String'/>" +
+      "    <nif:endIndex rdf:datatype='http://www.w3.org/2001/XMLSchema#nonNegativeInteger'>1</nif:endIndex>" +
+      "    <nif:predominantLanguage rdf:datatype='http://www.w3.org/2001/XMLSchema#string'>nl</nif:predominantLanguage>" +
+      "    <nif:isString rdf:datatype='http://www.w3.org/2001/XMLSchema#string'>-</nif:isString>" +
+      "    <rdf:type rdf:resource='http://persistence.uni-leipzig.org/nlp2rdf/ontologies/nif-core#Context'/>" +
+      "  </rdf:Description>" +
+      "</rdf:RDF>";
+
+    public turtle(ErrHandle objErr, String sContext, List<String> lstEntExpr, List<int> lstEntOffset) {
+      // Accept the parameters
+      this.errHandle = objErr;
+      this.lstItem = new List<turtleItem>();
+      this.context = sContext;
+      for (int i=0;i<lstEntExpr.Count;i++) {
+        this.lstItem.Add(new turtleItem(lstEntExpr[i], lstEntOffset[i]));
+      }
+      // Convert this into RDF internally
+      try {
+        // Read the model into an Xml document
+        XmlDocument pdxModel = new XmlDocument();
+        pdxModel.LoadXml(this.loc_sModel);
+
+        // Get the namespace managers required for this one
+        XmlNamespaceManager nsModel = new XmlNamespaceManager(pdxModel.NameTable);
+        nsModel.AddNamespace("nif", "http://persistence.uni-leipzig.org/nlp2rdf/ontologies/nif-core#");
+        // nsModel.AddNamespace("nif", pdxModel.DocumentElement.NamespaceURI);
+        nsModel.AddNamespace("rdf", "http://www.w3.org/1999/02/22-rdf-syntax-ns#");
+
+        // Set the necessary values within this XML specification
+        XmlNodeList ndxDescription = pdxModel.SelectNodes("./descendant::rdf:Description", nsModel);
+        XmlNode ndxThis = null;
+        XmlNode ndxWork = null;
+        XmlNode ndxParent = pdxModel.SelectSingleNode("./descendant-or-self::rdf:RDF", nsModel);
+
+        // The second <Description> node specifies the context
+        ndxThis = ndxDescription.Item(1);
+        // Set the start and end 
+        ndxThis.Attributes["rdf:about"].Value = "http://www.aksw.org/gerbil/NifWebService/request_0#char=0," + sContext.Length;
+        // Set the context string
+        ndxWork = ndxThis.SelectSingleNode("./child::nif:isString", nsModel);
+        ndxWork.InnerText = sContext;
+        // Set the end index
+        ndxWork = ndxThis.SelectSingleNode("./child::nif:endIndex", nsModel);
+        ndxWork.InnerText = sContext.Length.ToString();
+
+        // Process the first description node
+        if (lstEntExpr.Count>0) {
+          // Calculate start and end
+          int iStart = lstEntOffset[0];
+          String sItem = lstEntExpr[0];
+          int iEnd = iStart + sItem.Length;
+
+          // The first <Description> node specifies the string we are looking for
+          ndxThis = ndxDescription.Item(0);
+          // Set the start and end 
+          ndxThis.Attributes["rdf:about"].Value = "http://www.aksw.org/gerbil/NifWebService/request_0#char=" +
+            iStart + "," + iEnd;
+          // Set the begin and end index
+          ndxWork = ndxThis.SelectSingleNode("./child::nif:beginIndex", nsModel);
+          ndxWork.InnerText = iStart.ToString();
+          ndxWork = ndxThis.SelectSingleNode("./child::nif:endIndex", nsModel);
+          ndxWork.InnerText = iEnd.ToString();
+          // Set the item string
+          ndxWork = ndxThis.SelectSingleNode("./child::nif:anchorOf", nsModel);
+          ndxWork.InnerText = sItem;
+          // Set the referencecontext
+          ndxWork = ndxThis.SelectSingleNode("./child::nif:referenceContext", nsModel);
+          ndxWork.Attributes["rdf:resource"].Value = "http://www.aksw.org/gerbil/NifWebService/request_0#char=0," + sContext.Length;
+
+          // Prepare a copy of this node
+          String sZeroNode = ndxThis.OuterXml;
+
+          // Process all other entity expressions
+          for (int i=1;i<lstEntExpr.Count;i++) {
+            // Calculate start and end
+            iStart = lstEntOffset[i];
+            sItem = lstEntExpr[i];
+            iEnd = iStart + sItem.Length;
+
+            // Add the information from node 0
+            XmlNode ndxCopy = ndxThis.CloneNode(true);
+            XmlNode ndxNew = ndxParent.AppendChild(ndxCopy);
+
+            // Set the start and end 
+            ndxNew.Attributes["rdf:about"].Value = "http://www.aksw.org/gerbil/NifWebService/request_0#char=" +
+              iStart + "," + iEnd;
+            // Set the begin and end index
+            ndxWork = ndxNew.SelectSingleNode("./child::nif:beginIndex", nsModel);
+            ndxWork.InnerText = iStart.ToString();
+            ndxWork = ndxNew.SelectSingleNode("./child::nif:endIndex", nsModel);
+            ndxWork.InnerText = iEnd.ToString();
+            // Set the item string
+            ndxWork = ndxNew.SelectSingleNode("./child::nif:anchorOf", nsModel);
+            ndxWork.InnerText = sItem;
+            // Set the referencecontext
+            ndxWork = ndxNew.SelectSingleNode("./child::nif:referenceContext", nsModel);
+            ndxWork.Attributes["rdf:resource"].Value = "http://www.aksw.org/gerbil/NifWebService/request_0#char=0," + sContext.Length;
+          }
+        }
+
+
+        // Load and read the xml text
+        RdfXmlParser rdfParser = new RdfXmlParser();
+
+        String sPdx = pdxModel.SelectSingleNode("./descendant-or-self::rdf:RDF", nsModel).OuterXml;
+
+        rdfParser.Load(g, new StringReader(sPdx));
+
+
+      } catch (Exception e) {
+        errHandle.DoError("entity/turtle", e); // Provide standard error message
+      }
+    }
+
+    public turtle(ErrHandle objErr, String sItem, int iOffset, String sContext) {
+      // Accept the parameters
+      this.errHandle = objErr;
+      this.lstItem = new List<turtleItem>();
+      this.lstItem.Add(new turtleItem(sItem, iOffset));
+      this.context = sContext;
+      // Convert this into RDF internally
+      try {
+        // Calculate start and end
+        int iStart = iOffset;
+        int iEnd = iOffset + sItem.Length;
+
+        // Read the model into an Xml document
+        XmlDocument pdxModel = new XmlDocument();
+        pdxModel.LoadXml(this.loc_sModel);
+
+        // Get the namespace managers required for this one
+        XmlNamespaceManager nsModel = new XmlNamespaceManager(pdxModel.NameTable);
+        nsModel.AddNamespace("nif", "http://persistence.uni-leipzig.org/nlp2rdf/ontologies/nif-core#");
+        // nsModel.AddNamespace("nif", pdxModel.DocumentElement.NamespaceURI);
+        nsModel.AddNamespace("rdf", "http://www.w3.org/1999/02/22-rdf-syntax-ns#");
+
+        // Set the necessary values within this XML specification
+        XmlNodeList ndxDescription = pdxModel.SelectNodes("./descendant::rdf:Description", nsModel);
+        XmlNode ndxThis = null;
+        XmlNode ndxWork = null;
+
+        // The first <Description> node specifies the string we are looking for
+        ndxThis = ndxDescription.Item(0);
+        // Set the start and end 
+        ndxThis.Attributes["rdf:about"].Value = "http://www.aksw.org/gerbil/NifWebService/request_0#char=" + 
+          iStart + "," + iEnd;
+        // Set the begin and end index
+        ndxWork = ndxThis.SelectSingleNode("./child::nif:beginIndex", nsModel);
+        ndxWork.InnerText = iStart.ToString();
+        ndxWork = ndxThis.SelectSingleNode("./child::nif:endIndex", nsModel);
+        ndxWork.InnerText = iEnd.ToString();
+        // Set the item string
+        ndxWork = ndxThis.SelectSingleNode("./child::nif:anchorOf", nsModel);
+        ndxWork.InnerText = sItem;
+        // Set the referencecontext
+        ndxWork = ndxThis.SelectSingleNode("./child::nif:referenceContext", nsModel);
+        ndxWork.Attributes["rdf:resource"].Value = "http://www.aksw.org/gerbil/NifWebService/request_0#char=0," + sContext.Length;
+
+        // The second <Description> node specifies the context
+        ndxThis = ndxDescription.Item(1);
+        // Set the start and end 
+        ndxThis.Attributes["rdf:about"].Value = "http://www.aksw.org/gerbil/NifWebService/request_0#char=0," + sContext.Length;
+        // Set the context string
+        ndxWork = ndxThis.SelectSingleNode("./child::nif:isString", nsModel);
+        ndxWork.InnerText = sContext;
+        // Set the end index
+        ndxWork = ndxThis.SelectSingleNode("./child::nif:endIndex", nsModel);
+        ndxWork.InnerText = sContext.Length.ToString();
+
+        // Load and read the xml text
+        RdfXmlParser rdfParser = new RdfXmlParser();
+
+        String sPdx = pdxModel.SelectSingleNode("./descendant-or-self::rdf:RDF", nsModel).OuterXml;
+
+        rdfParser.Load(g, new StringReader(sPdx));
+
+
+
+        //// Specify namespaces
+        //g.NamespaceMap.AddNamespace("nif", new Uri("http://persistence.uni-leipzig.org/nlp2rdf/ontologies/nif-core#"));
+        //g.NamespaceMap.AddNamespace("rdf", new Uri("http://www.w3.org/1999/02/22-rdf-syntax-ns#"));
+        //// Specify Nodes
+        //IUriNode gerbilContext = g.CreateUriNode(UriFactory.Create("http://www.aksw.org/gerbil/NifWebService/request_0#char=0,"+sContext.Length));
+        //IUriNode nifIsString = g.CreateUriNode("nif:isString");
+        //IUriNode rdfType = g.CreateUriNode("rdf:type");
+        //IUriNode nifBeginIndex = g.CreateUriNode("nif:beginIndex");
+        //IUriNode nifEndIndex = g.CreateUriNode("nif:endIndex");
+        //IUriNode nifRefContext = g.CreateUriNode("nif:referenceContext");
+        //IUriNode nifAnchor = g.CreateUriNode("nif:anchorOf");
+
+        //// The context and the item should be turned into literals -- but then for DUTCH
+        //ILiteralNode litContext = g.CreateLiteralNode(sContext, sLanguage);
+        //ILiteralNode litItem = g.CreateLiteralNode(sItem, sLanguage);
+
+        //// Define the context in RDF elements
+        //g.Assert(new Triple(gerbilContext, nifIsString, litContext));
+
+      } catch (Exception e) {
+        errHandle.DoError("entity/turtle", e); // Provide standard error message
+      }
+    }
+
+    /* -------------------------------------------------------------------------------------
+     * Name:        create
+     * Goal:        Convert the RDF contents into a Turtle request string
+     * History:
+     * 7/nov/2016 ERK Created
+       ------------------------------------------------------------------------------------- */
+    public String create() {
+      String sBack = "";
+
+      try {
+        // Output the graph
+        // TurtleWriter tWriter = new TurtleWriter();
+        CompressingTurtleWriter tWriter = new CompressingTurtleWriter();
+        sBack = VDS.RDF.Writing.StringWriter.Write(g, tWriter);
+        return sBack;
+      } catch (Exception e) {
+        errHandle.DoError("entity/turtle/create", e); // Provide standard error message
+        return "";
+      }
+    }
+
+    private static Stream GenerateStreamFromString(string s) {
+      MemoryStream stream = new MemoryStream();
+      StreamWriter writer = new StreamWriter(stream);
+      writer.Write(s);
+      writer.Flush();
+      stream.Position = 0;
+      return stream;
+    }
   }
 
 }

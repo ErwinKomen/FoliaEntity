@@ -51,6 +51,11 @@ namespace FoliaEntity {
       util.xmlTools oXmlTools = new util.xmlTools(errHandle);
       String sConfidence = "0.20";
       String sFileShort = "";     // Short file name
+      StringWriter swText = null; // The whole text of the document (as context)
+      List<String> lstEntExpr;    // List of named entity expressions
+      List<int> lstEntIdx;        // List of indices of these named entity expressions
+      List<link> lstEntFlask;     // Flask answer
+      int iTextLength = 0;        // Length of the text
 
       try {
         // Validate
@@ -66,6 +71,7 @@ namespace FoliaEntity {
           sSubDir += sFileInDir.Substring(sDirIn.Length) ;
         }
         String sFileOut = Path.GetFullPath(sSubDir + "/" + sFileShort);
+        String sFileTmp = sFileOut + ".tmp";
         this.loc_sDirOut = sDirOut;
 
         // If the output file is already there: skip it
@@ -90,6 +96,10 @@ namespace FoliaEntity {
         iHits = 0;
         iFail = 0;
         // wrSet.NewLineOnAttributes = true;
+
+        lstEntExpr = new List<String>();  // List of named-entities
+        lstEntIdx = new List<int>();      // List of named-entity positions
+        lstEntFlask = new List<link>();   // List of links found by FLASK
 
         // The 'twopass' method:
         //      (1) Read the FoLiA with a stream-reader sentence-by-sentence
@@ -117,7 +127,8 @@ namespace FoliaEntity {
 
         // Open input file and output file
         using (rdFolia = XmlReader.Create(new StreamReader(sFileIn))) {
-          StreamWriter wrText = new StreamWriter(sFileOut);
+          StreamWriter wrText = new StreamWriter(sFileTmp);
+          swText = new StringWriter();      // Storage for the whole text context
           using (wrFolia = XmlWriter.Create(wrText, wrSet)) {
             iSentNum = 0;
             // Walk through the input file
@@ -166,6 +177,9 @@ namespace FoliaEntity {
                   // (6) preparations: retrieve the @xml:id attribute for logging
                   String sSentId = ndxFoliaS.Attributes["xml:id"].Value;
 
+                  // We also need to get the full sentence text
+                  String sSent = "";
+
                   // There are one or more entities to be processed: process them one-by-one
                   for (int j = 0; j < lstEnt.Count; j++) {
                     // (6) Combine the WORDS within the entity ref into a string
@@ -184,7 +198,6 @@ namespace FoliaEntity {
                     }
 
                     // (7) Calculate the offset for this particular entity as well as the sentence string
-                    String sSent = "";
                     int iOffset = 0;
                     for (int k = 0; k < lstW.Count; k++) {
                       // Make sure spaces are added at the appropriate places
@@ -196,6 +209,10 @@ namespace FoliaEntity {
                       // Extend the sentence
                       sSent += lstW[k].InnerText;
                     }
+
+                    // Process the named entity and the position within the larger text
+                    lstEntExpr.Add(sEntity);
+                    lstEntIdx.Add(iOffset + iTextLength);
 
                     // Check and remove any existing alignments...
                     List<XmlNode> lstAlg = oXmlTools.FixList(lstEnt[j].SelectNodes("./child::df:alignment", nsFolia));
@@ -237,6 +254,12 @@ namespace FoliaEntity {
                     }
 
                   }
+
+                  // Process the sentence into the larger text
+                  swText.WriteLine(sSent);
+                  // Keep track of the text length
+                  iTextLength += sSent.Length + 1;
+
                 }
 
 
@@ -272,6 +295,117 @@ namespace FoliaEntity {
           wrText.Close();
         }
 
+        // Make a request to the FLASK api
+        String sDocText = swText.ToString();
+        entity oFlask = new entity(errHandle, "", "", "", "", "");
+        if (!oFlask.docEntityToLinks(sDocText, lstEntExpr, lstEntIdx, ref lstEntFlask)) {
+          // Do something
+          errHandle.DoError("parseOneFoliaEntity", "Could not perform docEntityToLinks");
+        }
+
+        // Second pass: go through the text once more
+        int iEntityIndex = -1;
+        using (rdFolia = XmlReader.Create(new StreamReader(sFileTmp))) {
+          StreamWriter wrText = new StreamWriter(sFileOut);
+          swText = new StringWriter();      // Storage for the whole text context
+          using (wrFolia = XmlWriter.Create(wrText, wrSet)) {
+            iSentNum = 0;
+            // Walk through the input file
+            while (!rdFolia.EOF && rdFolia.Read()) {
+              // Look for a sentence again
+              if (rdFolia.IsStartElement("s")) {
+                // ============================================
+                // SENTENCE: Read the <s> element as one string
+                String sWholeS = rdFolia.ReadOuterXml();
+                iSentNum++;
+                // Process the <s> element:
+                // (1) put it into an XmlDocument
+                XmlDocument pdxSrc = new XmlDocument();
+                pdxSrc.LoadXml(sWholeS);
+                // (2) Create a namespace mapping for the folia *source* xml document
+                nsFolia = new XmlNamespaceManager(pdxSrc.NameTable);
+                nsFolia.AddNamespace("df", pdxSrc.DocumentElement.NamespaceURI);
+                // (3) preparations: read the sentence as XML
+                ndxFoliaS = pdxSrc.SelectSingleNode("./descendant-or-self::df:s[1]", nsFolia);
+                // (4) Check if this sentence contains an <entity>
+                List<XmlNode> lstEnt = oXmlTools.FixList(ndxFoliaS.SelectNodes("./descendant::df:entity", nsFolia));
+                if (lstEnt.Count > 0) {
+                  // (6) preparations: retrieve the @xml:id attribute for logging
+                  String sSentId = ndxFoliaS.Attributes["xml:id"].Value;
+
+                  // There are one or more entities to be processed: process them one-by-one
+                  for (int j = 0; j < lstEnt.Count; j++) {
+                    // Look in the stored list of named entity expressions and offsets
+                    iEntityIndex++;
+                    String sEntity = lstEntExpr[iEntityIndex];
+                    int iOffset = lstEntIdx[iEntityIndex];
+
+                    // (6b) Log the fact that we are processing this sentence
+                    if (bIsDebug) {
+                      errHandle.Status("s2[" + iSentNum + "]: " + sSentId + " [" + sEntity + "]\r");
+                    }
+
+                    // Get the FLASK entity resolution, which should provide exactly one additional alignment
+                    link lnkThis = lstEntFlask[iEntityIndex];
+
+                    if (lnkThis != null) {
+                      // Convert this link into an <alignment> item and add it to the current <entity>
+                      XmlDocument pdxAlign = new XmlDocument();
+                      String sAlignModel = "<FoLiA xmlns:xlink='http://www.w3.org/1999/xlink' xmlns='http://ilk.uvt.nl/folia'>" +
+                        "<s><alignment format='application/json' class='NEL' xlink:href='' xlink:type='simple' src=''></alignment>" +
+                        "</s></FoLiA>";
+                      pdxAlign.LoadXml(sAlignModel);
+                      // Set up a namespace manager for folia
+                      XmlNamespaceManager nmsDf = new XmlNamespaceManager(pdxAlign.NameTable);
+                      nmsDf.AddNamespace("df", pdxAlign.DocumentElement.NamespaceURI);
+
+                      XmlNode ndxAlignment = pdxAlign.SelectSingleNode("./descendant-or-self::df:alignment", nmsDf);
+                      ndxAlignment.Attributes["xlink:href"].Value = lnkThis.uri;
+                      ndxAlignment.Attributes["src"].Value = lnkThis.service;
+                      lstEnt[j].AppendChild(pdxSrc.ImportNode(ndxAlignment, true));
+
+                      String sClass = "";
+
+                      // Process logging output
+                      String sLogMsg = sFileShort + "\t" + sSentId + "\t" + sClass + "\t" + lnkThis.toCsv();
+                      doOneLogLine(sFileOutLog, sLogMsg);
+                    }
+
+                  }
+                }
+
+
+                // (10) Write the new <s> node to the writer
+                XmlReader rdResult = null;
+                try {
+                  rdResult = XmlReader.Create(new StringReader(ndxFoliaS.SelectSingleNode("./descendant-or-self::df:s", nsFolia).OuterXml));
+                  wrFolia.WriteNode(rdResult, true);
+                  // wrFolia.WriteString("\n");
+                } catch (Exception ex) {
+                  errHandle.DoError("ParseOneFoliaEntity", ex); // Provide standard error message
+                  return false;
+                }
+                wrFolia.Flush();
+                rdResult.Close();
+              } else {
+                // Just write it out
+                try {
+                  WriteShallowNode(rdFolia, wrFolia);
+                } catch (Exception ex) {
+                  errHandle.DoError("ParseOneFoliaEntity", ex); // Provide standard error message
+                  return false;
+                }
+              }
+            }
+            // Finish reading input
+            rdFolia.Close();
+            // Finish writing
+            wrFolia.Flush();
+            wrFolia.Close();
+            wrFolia = null;
+          }
+          wrText.Close();
+        }
         //  Garbage collection
         if (!bKeepGarbage) {
           //// Clean-up: remove temporary files as well as temporary directory
