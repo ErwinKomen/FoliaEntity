@@ -110,6 +110,9 @@ namespace FoliaEntity {
         // Clear the results
         lstEntLink.Clear();
 
+        // Initialize the return list
+        this.loc_lstLinks = new List<link>();
+
         // Create a FLASK request
         bool bFlask = this.oneFlaskRequest(sDocText, lstEntExpr, lstEntOffset, ref loc_lstLinks);
 
@@ -591,6 +594,43 @@ namespace FoliaEntity {
             }
             break;
           case "rdf":
+            // Convert the Turtle response into RDF/XML
+            turtle oTurtleConv = new turtle(errHandle);
+            XmlDocument pdxRdf = new XmlDocument();
+            if (oTurtleConv.turtleToRdfXml(sReply, ref pdxRdf)) {
+              // Get the namespace managers required for this one
+              XmlNamespaceManager nsModel = new XmlNamespaceManager(pdxRdf.NameTable);
+              nsModel.AddNamespace("nif", "http://persistence.uni-leipzig.org/nlp2rdf/ontologies/nif-core#");
+              nsModel.AddNamespace("rdf", "http://www.w3.org/1999/02/22-rdf-syntax-ns#");
+              nsModel.AddNamespace("ns1", "http://www.w3.org/2005/11/its/rdf#");
+
+              // Check if there are any replies
+              XmlNodeList ndxList = pdxRdf.SelectNodes("./descendant::nif:Phrase", nsModel);
+              if (ndxList != null && ndxList.Count>0) {
+                // Pre-load the FIRST response
+                pdxReply.LoadXml(loc_sRespModel);
+                XmlNode ndxFirst = pdxReply.SelectSingleNode("./descendant::Resource[1]");
+                ndxFirst.Attributes["service"].Value = "flask";
+                ndxFirst.Attributes["URI"].Value = ndxList[0].SelectSingleNode("./child::ns1:taIdentRef", nsModel).Attributes["rdf:resource"].Value;
+                ndxFirst.Attributes["support"].Value = "1";
+                ndxFirst.Attributes["types"].Value = "";
+                ndxFirst.Attributes["surfaceForm"].Value = ndxList[0].SelectSingleNode("./child::nif:anchorOf", nsModel).InnerText;
+                ndxFirst.Attributes["offset"].Value = ndxList[0].SelectSingleNode("./child::nif:beginIndex", nsModel).InnerText;
+                ndxFirst.Attributes["similarityScore"].Value = ndxList[0].SelectSingleNode("./child::nif:confidence", nsModel).InnerText;
+                ndxFirst.Attributes["percentageOfSecondRank"].Value = "0.0";
+
+                // Walk through all other responses
+                XmlNode ndxParent = ndxFirst.ParentNode;
+                for (int i=1;i<ndxList.Count;i++) {
+                  // Copy the standard response
+                  XmlNode ndxNew = ndxParent.AppendChild(ndxFirst.CloneNode(true));
+                  ndxNew.Attributes["URI"].Value = ndxList[i].SelectSingleNode("./child::ns1:taIdentRef", nsModel).Attributes["rdf:resource"].Value;
+                  ndxNew.Attributes["surfaceForm"].Value = ndxList[i].SelectSingleNode("./child::nif:anchorOf", nsModel).InnerText;
+                  ndxNew.Attributes["offset"].Value = ndxList[i].SelectSingleNode("./child::nif:beginIndex", nsModel).InnerText;
+                  ndxNew.Attributes["similarityScore"].Value = ndxList[i].SelectSingleNode("./child::nif:confidence", nsModel).InnerText;
+                }
+              }
+            }
             break;
         }
         // Return the XML document
@@ -765,6 +805,7 @@ namespace FoliaEntity {
     public String context;            // The context for the request
     public ErrHandle errHandle;       // Own copy of error handler for error communication
     public String sLanguage = "nl";   // Default language
+    private String sDecimals = "D7";  // 8 decimal string
     private IGraph g = new Graph();   // Required graph
     private String loc_sModel = 
       "<?xml version='1.0' encoding='UTF-8'?>" +
@@ -792,6 +833,10 @@ namespace FoliaEntity {
       "    <rdf:type rdf:resource='http://persistence.uni-leipzig.org/nlp2rdf/ontologies/nif-core#Context'/>" +
       "  </rdf:Description>" +
       "</rdf:RDF>";
+
+    public turtle(ErrHandle objErr) {
+      this.errHandle = objErr;
+    }
 
     public turtle(ErrHandle objErr, String sContext, List<String> lstEntExpr, List<int> lstEntOffset) {
       // Accept the parameters
@@ -841,7 +886,7 @@ namespace FoliaEntity {
           ndxThis = ndxDescription.Item(0);
           // Set the start and end 
           ndxThis.Attributes["rdf:about"].Value = "http://www.aksw.org/gerbil/NifWebService/request_0#char=" +
-            iStart + "," + iEnd;
+            iStart.ToString(sDecimals) + "," + iEnd.ToString(sDecimals);
           // Set the begin and end index
           ndxWork = ndxThis.SelectSingleNode("./child::nif:beginIndex", nsModel);
           ndxWork.InnerText = iStart.ToString();
@@ -870,7 +915,7 @@ namespace FoliaEntity {
 
             // Set the start and end 
             ndxNew.Attributes["rdf:about"].Value = "http://www.aksw.org/gerbil/NifWebService/request_0#char=" +
-              iStart + "," + iEnd;
+              iStart.ToString(sDecimals) + "," + iEnd.ToString(sDecimals);
             // Set the begin and end index
             ndxWork = ndxNew.SelectSingleNode("./child::nif:beginIndex", nsModel);
             ndxWork.InnerText = iStart.ToString();
@@ -933,9 +978,9 @@ namespace FoliaEntity {
           iStart + "," + iEnd;
         // Set the begin and end index
         ndxWork = ndxThis.SelectSingleNode("./child::nif:beginIndex", nsModel);
-        ndxWork.InnerText = iStart.ToString();
+        ndxWork.InnerText = iStart.ToString(sDecimals);
         ndxWork = ndxThis.SelectSingleNode("./child::nif:endIndex", nsModel);
-        ndxWork.InnerText = iEnd.ToString();
+        ndxWork.InnerText = iEnd.ToString(sDecimals);
         // Set the item string
         ndxWork = ndxThis.SelectSingleNode("./child::nif:anchorOf", nsModel);
         ndxWork.InnerText = sItem;
@@ -1005,6 +1050,30 @@ namespace FoliaEntity {
       } catch (Exception e) {
         errHandle.DoError("entity/turtle/create", e); // Provide standard error message
         return "";
+      }
+    }
+
+    /* -------------------------------------------------------------------------------------
+     * Name:        turtleToRdfXml
+     * Goal:        Convert a Turtle reply into RDF/XML
+     * History:
+     * 7/nov/2016 ERK Created
+       ------------------------------------------------------------------------------------- */
+    public bool turtleToRdfXml(String sTurtle, ref XmlDocument pdxBack) {
+      try {
+        // Load the turtle
+        IGraph g = new Graph();
+        TurtleParser ttlParser = new TurtleParser();
+        ttlParser.Load(g, new StringReader(sTurtle));
+
+        // Output as RDF/XML
+        RdfXmlWriter tWriter = new RdfXmlWriter();
+        String sBack = VDS.RDF.Writing.StringWriter.Write(g, tWriter);
+        pdxBack.LoadXml(sBack);
+        return true;
+      } catch (Exception e) {
+        errHandle.DoError("entity/turtle/turtleToRdfXml", e); // Provide standard error message
+        return false;
       }
     }
 
