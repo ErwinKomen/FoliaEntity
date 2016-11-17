@@ -39,6 +39,7 @@ namespace FoliaEntity {
       String sOutput = "";      // Output directory
       String sAnnot = "";       // Name of annotator
       String sLogFile = "";     // Name of log file
+      String sMethods = "";     // Methods to be used
       int iHits = 0;            // Total hits
       int iFail = 0;            // Total failures
       bool bIsDebug = false;    // Debugging
@@ -65,6 +66,9 @@ namespace FoliaEntity {
               case "w": // Overwrite output
                 bOverwrite = true;
                 break;
+              case "m": // Get the methods to be used
+                sMethods = args[++i].ToLower();
+                break;
               case "a": // Annotator name
                 sAnnot = args[++i].ToLower();
                 break;
@@ -77,11 +81,6 @@ namespace FoliaEntity {
             SyntaxError("1 - i=" + i + " args=" + args.Length + " argCurrent=[" + sArg + "]"); return;
           }
         }
-
-        //// ================ DEBUG ===============
-        //errHandle.Status("Debugging: " + bIsDebug + "\n");
-        //errHandle.Status("sInput: " + sInput + "\n");
-        //errHandle.Status("sOutput: " + sOutput + "\n");
 
         // Check presence of input/output
         if (sInput == "" || sOutput == "") { SyntaxError("2"); return; }
@@ -117,7 +116,7 @@ namespace FoliaEntity {
           File.WriteAllText(sLogFile, "");
         }
         // Call the main entry point for the conversion
-        feConv objConv = new feConv();
+        feConv objConv = new feConv(sMethods);
 
         // Other initialisations
         // Initialise the Treebank Xpath functions, which may make use of tb:matches()

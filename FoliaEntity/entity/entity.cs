@@ -10,6 +10,7 @@ using System.Web;
 using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
+using Newtonsoft.Json;
 
 
 namespace FoliaEntity {
@@ -23,6 +24,7 @@ namespace FoliaEntity {
     private String sApiStart = "http://spotlight.sztaki.hu:2232/rest/";
     private String sApiLotus = "http://lotus.lodlaundromat.org/retrieve/";
     private String sApiFlask = "http://flask.fii800.lod.labs.vu.nl";
+    private String sApiHisto = "https://api.histograph.io/search";
     private int iBufSize = 1024;        // Buffer size
     private string strNs = "";          // Possible namespace URI
     private ErrHandle errHandle;        // Our own copy of the error handle
@@ -38,10 +40,14 @@ namespace FoliaEntity {
     private String loc_sReqModel = "<annotation text=''><surfaceForm name='' offset='' /></annotation>";
     private String loc_sRespModel = 
       "<?xml version='1.0' encoding='utf-8'?><Annotation><Resources>" + 
-      "<Resource service='' URI='' support='' types='' surfaceForm='' offset='' similarityScore='' percentageOfSecondRank='' />" + 
+      "<Resource service='' URI='' support='1' types='' surfaceForm='' offset='0' similarityScore='1.0' percentageOfSecondRank='0.0' />" + 
       "</Resources></Annotation>";
     private Regex regHref = new Regex("(href=['\"]?)([^'\"]+)");
     private bool bDebug = false;        // Debugging set or not
+    private bool bSpotlight = false;  // Use SPOTLIGHT api
+    private bool bHistograph = false; // Use HISTOGRAPH api
+    private bool bFlask = false;      // Use FLASK api
+    private bool bLaundromat = false; // Use LOD Laundromat api
     // =========================================================================================================
     public entity(ErrHandle objErr, String sEntity, String sClass, String sSent, String sOffset, String sId) {
       this.errHandle = objErr;
@@ -60,6 +66,10 @@ namespace FoliaEntity {
     public int get_hits() { return this.loc_iHits; }
     public int get_fail() { return this.loc_iFail; }
     public void set_debug(bool bSet) { this.bDebug = bSet; }
+    public void set_spotlight(bool bSet) { this.bSpotlight = bSet; }
+    public void set_histograph(bool bSet) { this.bHistograph = bSet; }
+    public void set_flask(bool bSet) { this.bFlask = bSet; }
+    public void set_laundromat(bool bSet) { this.bLaundromat = bSet; }
 
     /* -------------------------------------------------------------------------------------
      * Name:        oneEntityToLinks
@@ -69,21 +79,35 @@ namespace FoliaEntity {
      * 24/oct/2016 ERK Created
        ------------------------------------------------------------------------------------- */
     public bool oneEntityToLinks(String sConfidence) {
+      bool bResult = false;
       try {
         // Initialize the return list
         this.loc_lstLinks = new List<link>();
 
-        // Try making a disambiguation SPOTLIGHT request
-        bool bResult = this.oneSpotlightRequest("disambiguate", sConfidence, ref loc_lstLinks);
-        if(!bResult) {
-          // Give it another go: try the 'annotate' method
-          bResult = this.oneSpotlightRequest("annotate", sConfidence, ref loc_lstLinks);
+        // Use the SPOTLIGHT API
+        if (bSpotlight) {
+          // Try making a disambiguation SPOTLIGHT request
+          bResult = this.oneSpotlightRequest("disambiguate", sConfidence, ref loc_lstLinks);
+          if (!bResult) {
+            // Give it another go: try the 'annotate' method
+            bResult = this.oneSpotlightRequest("annotate", sConfidence, ref loc_lstLinks);
+          }
         }
 
-        // Add a LOTUS request
-        bool bLotus = this.oneLotusRequest(sConfidence, ref loc_lstLinks);
-        // Possibly adapt the result boolean
-        if (!bResult) bResult = bLotus;
+        // Use the LOD-Laundromat API
+        if (bLaundromat) {
+          // Add a LOTUS request
+          bool bLotus = this.oneLotusRequest(sConfidence, ref loc_lstLinks);
+          // Possibly adapt the result boolean
+          if (!bResult) bResult = bLotus;
+        }
+
+        // Use the HISTOGRAPH API
+        if (bHistograph) {
+          bool bHistoResult = this.oneHistographRequest(ref loc_lstLinks);
+          // Possibly adapt the result boolean
+          if (!bResult) bResult = bHistoResult;
+        }
 
         // Return what we found
         return bResult;
@@ -104,7 +128,7 @@ namespace FoliaEntity {
      * 7/nov/2016 ERK Created
        ------------------------------------------------------------------------------------- */
     public bool docEntityToLinks(String sDocText, List<String> lstEntExpr, List<int> lstEntOffset, ref List<link> lstEntLink) {
-      bool bResult = true;
+      bool bResult = false;
 
       try {
         // Clear the results
@@ -113,12 +137,16 @@ namespace FoliaEntity {
         // Initialize the return list
         this.loc_lstLinks = new List<link>();
 
-        // Create a FLASK request
-        bool bFlask = this.oneFlaskRequest(sDocText, lstEntExpr, lstEntOffset, ref loc_lstLinks);
-
-        // Process the answer
+        // Use the FLASK methods?
         if (bFlask) {
-          lstEntLink = loc_lstLinks;
+          // Create a FLASK request
+          bool bFlask = this.oneFlaskRequest(sDocText, lstEntExpr, lstEntOffset, ref loc_lstLinks);
+
+          // Process the answer
+          if (bFlask) {
+            lstEntLink = loc_lstLinks;
+          }
+          if (!bResult) bResult = bFlask;
         }
 
         // Return what we found
@@ -382,6 +410,43 @@ namespace FoliaEntity {
     }
 
     /* -------------------------------------------------------------------------------------
+     * Name:        oneHistographRequest
+     * Goal:        Perform one request to the Histograph API (erfgoed & locatie)
+     * Parameters:  lstLinks    - List of 'link' objects
+     * History:
+     * 14/nov/2016 ERK Created
+       ------------------------------------------------------------------------------------- */
+    private bool oneHistographRequest(ref List<link> lstLinks) {
+      String sData = "";
+
+      try {
+        // Retrieve the entity name and the class
+        String sLocation = this.loc_sEntity;
+        String sClass = this.loc_sClass;
+        // Is this of the LOC class?
+        if (sClass.ToLower() == "loc") {
+          // There is a location, so search for it.
+          sData = "name=" + HttpUtility.UrlEncode(sLocation, Encoding.UTF8) +
+            "&type=hg:Place&dataset=tgn,geonames,kloeke,whosonfirst";
+          // Note: one can add parameters [before=] and [after=] to identify start and end year
+          // See: https://github.com/histograph/api
+
+          // Make a request
+          XmlDocument pdxReply = MakeXmlPostRequest(sApiHisto, "", sData);
+
+          // Check the reply and process it
+          if (pdxReply != null) {
+          }
+        }
+        // Be positive
+        return true;
+      } catch (Exception ex) {
+        errHandle.DoError("entity/oneHistographRequest", ex); // Provide standard error message
+        return false;
+      }
+    }
+
+    /* -------------------------------------------------------------------------------------
      * Name:        oneLotusRequest
      * Goal:        Perform one request to SPOTLIGHT
      * Parameters:  sConfidence - Minimal level of confidence that should be met
@@ -484,7 +549,7 @@ namespace FoliaEntity {
 
     /* -------------------------------------------------------------------------------------
      * Name:        MakeXmlPostRequest
-     * Goal:        Issue a POST request  that expects an XML answer
+     * Goal:        Issue a GET or POST request  that expects an XML answer
      * Parameters:  sMethod     - Either 'disambiguate' or 'annotate'
      *              sConfidence - Minimal level of confidence that should be met
      *              lstLinks    - List of 'link' objects
@@ -501,7 +566,7 @@ namespace FoliaEntity {
 
         HttpWebRequest request = null;
         // Set the method correctly
-        if (sUrlStart.ToLower().Contains("lotus")) {
+        if (sUrlStart.ToLower().Contains("lotus") || sUrlStart.ToLower().Contains("histograph")) {
           // Create a request
           request = (HttpWebRequest)WebRequest.Create(sRequest + "?" + sData);
           request.Method = "GET";
@@ -571,25 +636,93 @@ namespace FoliaEntity {
             pdxReply.LoadXml(sReply);
             break;
           case "json":
-            LotusResponse oLotus = Newtonsoft.Json.JsonConvert.DeserializeObject<LotusResponse>(sReply);
-            // Pre-load a response
-            pdxReply.LoadXml(loc_sRespModel);
-            // Find the correct node
-            XmlNode ndxResource = pdxReply.SelectSingleNode("./descendant::Resource[1]");
-            // Sanity check
-            if (ndxResource != null) {
-              // Do we actually have results?
-              if (oLotus != null && oLotus.numhits>0) {
-                // Fill in the values of this node
-                LotusHit oHit = oLotus.hits[0];  // Take the first hit
-                ndxResource.Attributes["service"].Value = "lotus";
-                ndxResource.Attributes["URI"].Value = oHit.subject;
-                ndxResource.Attributes["support"].Value = "1";
-                ndxResource.Attributes["types"].Value = "";
-                ndxResource.Attributes["surfaceForm"].Value = this.loc_sEntity;
-                ndxResource.Attributes["offset"].Value = "0";
-                ndxResource.Attributes["similarityScore"].Value = "1.0";
-                ndxResource.Attributes["percentageOfSecondRank"].Value = "0.0";
+            // Check if this is a LOTUS (LOD-Laundromat) request
+            if (sUrlStart.ToLower().Contains("lotus")) {
+              // This is a LAUNDROMAT request
+              LotusResponse oLotus = Newtonsoft.Json.JsonConvert.DeserializeObject<LotusResponse>(sReply);
+              // Pre-load a response
+              pdxReply.LoadXml(loc_sRespModel);
+              // Find the correct node
+              XmlNode ndxResource = pdxReply.SelectSingleNode("./descendant::Resource[1]");
+              // Sanity check
+              if (ndxResource != null) {
+                // Do we actually have results?
+                if (oLotus != null && oLotus.numhits > 0) {
+                  // Fill in the values of this node
+                  LotusHit oHit = oLotus.hits[0];  // Take the first hit
+                  ndxResource.Attributes["service"].Value = "lotus";
+                  ndxResource.Attributes["URI"].Value = oHit.subject;
+                  ndxResource.Attributes["support"].Value = "1";
+                  ndxResource.Attributes["types"].Value = "";
+                  ndxResource.Attributes["surfaceForm"].Value = this.loc_sEntity;
+                  ndxResource.Attributes["offset"].Value = "0";
+                  ndxResource.Attributes["similarityScore"].Value = "1.0";
+                  ndxResource.Attributes["percentageOfSecondRank"].Value = "0.0";
+                }
+              }
+            } else if (sUrlStart.ToLower().Contains("histograph")) {
+              // Try generalized JSON to XML conversion...
+              XmlDocument pdxHisto = JsonConvert.DeserializeXmlNode(sReply.Replace("@", ""), "histograph");
+
+
+              //HistographResponse oHisto = null;
+              //try {
+              //  // This is a HISTOGRAPH request
+              //  oHisto = Newtonsoft.Json.JsonConvert.DeserializeObject<HistographResponse>(sReply);
+              //} catch (Exception ex) {
+              //  int iStop = 1;
+              //}
+              // Pre-load a response
+              pdxReply.LoadXml(loc_sRespModel);
+              XmlNode ndxFirst = pdxReply.SelectSingleNode("./descendant::Resource[1]");
+              XmlNode ndxNew = ndxFirst;
+              // Sanity check
+              if (ndxFirst != null) {
+                // Do we actually have results?
+                // Must have a features[] array with at least one member
+                XmlNodeList ndxPits = pdxHisto.SelectNodes("./descendant-or-self::histograph/child::features[1]/child::properties[1]/child::pits");
+                // if (oHisto != null && oHisto.type == "FeatureCollection" && oHisto.features.Length > 0) {
+                if (ndxPits.Count>0) { }
+                  // Walk through the results, finding the first one with type "hg:Place"
+                  int iFound = 0;
+                  //for (int j=0;j<oHisto.features.Length;j++) {
+                  //  // Access this element
+                  //  HistoFeature oFeat = oHisto.features[j];
+                  //  // Get this type
+                  //  String sHgPropertyType = oFeat.properties[0].type;
+                  //  // Test
+                  //  if (sHgPropertyType == "hg:Place") {
+                  //    // Got you!
+                  //    iFound = j;
+                  //    break;
+                  //  }
+                  //}
+                  //// Access the correct element
+                  //HistoFeature oFeatHit = oHisto.features[iFound];
+                  //// Walk through all the [pits] elements
+                  //for (int j=0;j<oFeatHit.properties[0].pits.Length; j++) {
+                  for (int j=0;j<ndxPits.Count;j++) {
+                    // Get this pit object
+                    // HistoPit oPit = oFeatHit.properties[0].pits[j];
+                    XmlNode ndxPit = ndxPits[j];
+                    // We can process only SOME of the pits
+                    // switch (oPit.dataset) {
+                    String sDataset = ndxPit.SelectSingleNode("./child::dataset").InnerText;
+                      switch (sDataset) {
+                      case "geonames":
+                        case "tgn":
+                        case "kloeke":
+                        case "whosonfirst":
+                          if (ndxNew.Attributes["service"].Value != "")
+                            ndxNew = ndxFirst.ParentNode.AppendChild(ndxFirst.CloneNode(true));
+                            //ndxNew.Attributes["service"].Value = "histograph:" + oPit.dataset;
+                            //ndxNew.Attributes["URI"].Value = oPit.uri;
+                          ndxNew.Attributes["service"].Value = "histograph:" + sDataset;
+                          ndxNew.Attributes["URI"].Value = ndxPit.SelectSingleNode("./child::uri").InnerText;
+                          break;
+                      }
+                    }
+                // }
               }
             }
             break;
@@ -790,6 +923,108 @@ namespace FoliaEntity {
     public int numhits;
     public int returned;
     public LotusHit[] hits;
+  }
+
+  public class HistoIdType {
+    public String @id;
+    public String @type;
+  }
+  public class HistoId {
+    public String @id;
+  }
+  public class HistoContext {
+    public String @base;
+    public String @vocab;
+    public String features;
+    public HistoIdType dataset;
+    public HistoIdType type;
+    public String hairs;
+    public String relations;
+    public String properties;
+    public String pits;
+    public String name;
+    public String geometryIndex;
+    public String geometry;
+    public String data;
+    public String validSince;
+    public String validUntil;
+  }
+  public class HistoData {
+    public String featureClass;
+    public String featureCode;
+    public String countryCode;
+    public String cc2;
+    public String admin1Code;
+    public String admin2Code;
+    public String admin3Code;
+    public String admin4Code;
+  }
+  public class HistoHair {
+    public String type;
+    public String uri;
+    public String name;
+    public String @id;
+  }
+  public class HistoRelation {
+    [JsonProperty("hg:sameHgConcept")]
+    public HistoId[] sameHgConcept;
+    [JsonProperty("hg:liesIn")]
+    public HistoId[] liesIn;
+    [JsonProperty("id")]
+    public String @id;
+  }
+  public class HistoPit {
+    public HistoData data;
+    public String dataset;
+    public String type;
+    public String uri;
+    public String name;
+    public int geometryIndex;
+    public HistoHair[] hairs;
+    public HistoRelation[] relations;
+    public String @id;
+  }
+  public class HistoProperty {
+    public String type;
+    public HistoPit[] pits;
+  }
+  class SingleOrArrayConverter<T>: JsonConverter {
+    public override bool CanConvert(Type objectType) {
+      return (objectType == typeof(List<T>));
+    }
+
+    public override object ReadJson(JsonReader reader, Type objectType, object existingValue, JsonSerializer serializer) {
+      Newtonsoft.Json.Linq.JToken token = Newtonsoft.Json.Linq.JToken.Load(reader);
+      if (token.Type == Newtonsoft.Json.Linq.JTokenType.Array) {
+        return token.ToObject<List<T>>();
+      }
+      return new List<T> { token.ToObject<T>() };
+    }
+
+    public override bool CanWrite
+    {
+      get { return false; }
+    }
+
+    public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer) {
+      throw new NotImplementedException();
+    }
+  }
+  public class HistoGeometry {
+    public String type;
+    [JsonProperty("coordinates")]
+    [JsonConverter(typeof(SingleOrArrayConverter<double>))]
+    public List<double> coordinates;
+  }
+  public class HistoFeature {
+    public String type; // E.g. 'Feature'
+    public HistoProperty[] properties;
+    public HistoGeometry[] geometries;
+  }
+  public class HistographResponse {
+    public HistoContext context;
+    public String type;   // E.g: FeatureCollection
+    public HistoFeature[] features;
   }
 
   public class turtleItem {
