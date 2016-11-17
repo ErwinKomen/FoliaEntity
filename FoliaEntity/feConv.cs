@@ -23,16 +23,17 @@ namespace FoliaEntity {
     private bool bHistograph = false; // Use HISTOGRAPH api
     private bool bFlask = false;      // Use FLASK api
     private bool bLaundromat = false; // Use LOD Laundromat api
+    private bool bTwoPass = false;    // Use a Two-pass method
     private Regex regQuoted = new Regex("xmlns(\\:(\\w)*)?=\"(.*?)\"");
     // ======================== Getters and setters =======================================
     public void set_method(String sMethods) {
       for (int j = 0; j < sMethods.Length; j++) {
         String sSub = sMethods.Substring(j, 1);
         switch (sSub) {
-          case "f": bFlask = true; break;
-          case "s": bSpotlight = true; break;
-          case "l": bLaundromat = true; break;
-          case "h": bHistograph = true; break;
+          case "f": bFlask = true; errHandle.Status("Method: use FLASK"); break;
+          case "s": bSpotlight = true; errHandle.Status("Method: use SPOTLIGHT"); break;
+          case "l": bLaundromat = true; errHandle.Status("Method: use LOD-LAUNDROMAT"); break;
+          case "h": bHistograph = true; errHandle.Status("Method: use HISTOGRAPH"); break;
         }
       }
     }
@@ -93,9 +94,21 @@ namespace FoliaEntity {
           String sFileInDir = Path.GetDirectoryName(sFileIn);
           sSubDir += sFileInDir.Substring(sDirIn.Length) ;
         }
+
+        // Is this a one-pass or two-pass execution?
+        if (bFlask)
+          bTwoPass = true;
+
         String sFileOut = Path.GetFullPath(sSubDir + "/" + sFileShort);
-        String sFileTmp = sFileOut + ".tmp";
         this.loc_sDirOut = sDirOut;
+
+        // Determine FileTmp, depending on the pass-method
+        String sFileTmp = "";
+        if (bTwoPass) {
+          sFileTmp = sFileOut + ".tmp";
+        } else {
+          sFileTmp = sFileOut;
+        }
 
         // If the output file is already there: skip it
         if (!bOverwrite && File.Exists(sFileOut)) { debug("Skip existing [" + sFileOut + "]"); return true; }
@@ -276,7 +289,7 @@ namespace FoliaEntity {
                         lstEnt[j].AppendChild(pdxSrc.ImportNode(ndxAlignment, true));
 
                         // Process logging output
-                        String sLogMsg = sFileShort + "\t" + sSentId + "\t" + sClass + "\t" + lnkThis.toCsv();
+                        String sLogMsg = sFileShort + "\t" + sSentId + "\t" + sClass + "\t" + sEntity + "\t" + lnkThis.toCsv();
                         doOneLogLine(sFileOutLog, sLogMsg);
                       }
                     }
@@ -323,8 +336,9 @@ namespace FoliaEntity {
           wrText.Close();
         }
 
+
         // Are we to use DOCUMENT-based methods??
-        if (bFlask) {
+        if (bTwoPass) {
           // Prepare document-based methods
           String sDocText = swText.ToString();
           entity oDocMethods = new entity(errHandle, "", "", "", "", "");
@@ -447,6 +461,10 @@ namespace FoliaEntity {
           //Directory.Delete(sFileOutDir, true);
           // Clean-up: remove the .log file
           File.Delete(sFileOutLog);
+          // Only delete temporary output if it was a two-pass execution
+          if (bTwoPass) {
+            File.Delete(sFileTmp);
+          }
         }
 
 

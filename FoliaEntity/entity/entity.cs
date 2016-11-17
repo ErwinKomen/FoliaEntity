@@ -29,6 +29,7 @@ namespace FoliaEntity {
     private string strNs = "";          // Possible namespace URI
     private ErrHandle errHandle;        // Our own copy of the error handle
     private String loc_sEntity = "";    // The Named Entity string
+    private String loc_sAltName = "";   // Alternative name
     private String loc_sClass = "";     // The kind of NE (loc, per etc)
     private String loc_sSent = "";      // The sentence
     private String loc_sOffset = "";    // Offset as a string
@@ -79,10 +80,17 @@ namespace FoliaEntity {
      * 24/oct/2016 ERK Created
        ------------------------------------------------------------------------------------- */
     public bool oneEntityToLinks(String sConfidence) {
-      bool bResult = false;
+      bool bResult = false;     // Flag that we will return
+      String sAltLocName = "";  // Alternative name for the location
+
       try {
         // Initialize the return list
         this.loc_lstLinks = new List<link>();
+        this.loc_sAltName = "";
+
+        if (loc_sEntity.Contains("Pakistan")) {
+          int iStop = 1;
+        }
 
         // Use the SPOTLIGHT API
         if (bSpotlight) {
@@ -91,6 +99,20 @@ namespace FoliaEntity {
           if (!bResult) {
             // Give it another go: try the 'annotate' method
             bResult = this.oneSpotlightRequest("annotate", sConfidence, ref loc_lstLinks);
+          }
+          if (bResult && loc_lstLinks.Count>0) {
+            // Get to the first found result
+            link oRes = loc_lstLinks[0];
+            // Get the URI
+            String sUri = oRes.uri;
+            // Take the part of the URI after the last /
+            String sLast = sUri.Substring(sUri.LastIndexOf('/')+1);
+            // See if there is a _ in the word
+            int iUscore = sLast.IndexOf("_(");
+            if (iUscore>0) sLast = sLast.Substring(0, iUscore);
+            // We have an alternative name
+            sAltLocName = sLast;
+            this.loc_sAltName = sLast;
           }
         }
 
@@ -104,7 +126,15 @@ namespace FoliaEntity {
 
         // Use the HISTOGRAPH API
         if (bHistograph) {
-          bool bHistoResult = this.oneHistographRequest(ref loc_lstLinks);
+          if (bDebug) {
+            errHandle.Status("Attempting Histograph [1]");
+          }
+          bool bHistoResult = this.oneHistographRequest("", ref loc_lstLinks);
+          // Do we get a negative response?
+          if (!bHistoResult && sAltLocName != "" && sAltLocName != this.loc_sEntity) {
+            // Try again, but now with alternative location
+            bHistoResult = this.oneHistographRequest(sAltLocName, ref loc_lstLinks);
+          }
           // Possibly adapt the result boolean
           if (!bResult) bResult = bHistoResult;
         }
@@ -227,6 +257,7 @@ namespace FoliaEntity {
 
         // Check the reply and process it
         if (pdxReply != null) {
+          String sEntity = this.loc_sEntity;
           // Find a list of all <Resource> answers
           XmlNodeList lstResources = pdxReply.SelectNodes("./descendant::Resource");
           for (int i=0;i<lstResources.Count;i++) {
@@ -412,34 +443,88 @@ namespace FoliaEntity {
     /* -------------------------------------------------------------------------------------
      * Name:        oneHistographRequest
      * Goal:        Perform one request to the Histograph API (erfgoed & locatie)
-     * Parameters:  lstLinks    - List of 'link' objects
+     * Parameters:  sLocRequest - Alternative name for the location, taken from dbpedia/spotlight
+     *              lstLinks    - List of 'link' objects
      * History:
      * 14/nov/2016 ERK Created
+     * 17/nov/2016 ERK Added alternative location name argument
        ------------------------------------------------------------------------------------- */
-    private bool oneHistographRequest(ref List<link> lstLinks) {
+    private bool oneHistographRequest(String sLocRequest, ref List<link> lstLinks) {
       String sData = "";
+      bool bResult = false;
 
       try {
         // Retrieve the entity name and the class
-        String sLocation = this.loc_sEntity;
+        String sLocation = (sLocRequest == "") ? this.loc_sEntity : sLocRequest;
         String sClass = this.loc_sClass;
         // Is this of the LOC class?
         if (sClass.ToLower() == "loc") {
           // There is a location, so search for it.
+          // Parameters:
+          //   type=hg:Place        - Restrict searching to entries marked as Place
+          //                          NO -- don't do this. Otherwise we miss hg:Country
+          //   exact=false          - match inexact names: do a sanity check later on the results
+          //   geometry=false       - No need to add the geometry
+          //   dataset=tgn          - 
+          //   dataset=geonames     -
+          //   dataset=kloeke       - Find a link to the KloekeCode of this location
+          //   dataset=whosonfirst  - 
           sData = "name=" + HttpUtility.UrlEncode(sLocation, Encoding.UTF8) +
-            "&type=hg:Place&dataset=tgn,geonames,kloeke,whosonfirst";
+            "&geometry=false" +
+            "&dataset=tgn,geonames,kloeke,whosonfirst";
           // Note: one can add parameters [before=] and [after=] to identify start and end year
           // See: https://github.com/histograph/api
 
-          // Make a request
+          if (bDebug) {
+            errHandle.Status("Attempting Histograph [2]: [" + sApiHisto + "] [" + sData + "]");
+          }
+
+          // Make a GET request (this is done by looking at the URI string)
           XmlDocument pdxReply = MakeXmlPostRequest(sApiHisto, "", sData);
 
           // Check the reply and process it
           if (pdxReply != null) {
+            // We have a result
+            bResult = true;
+            // Find a list of all <Resource> answers
+            XmlNodeList lstResources = pdxReply.SelectNodes("./descendant::Resource");
+
+            if (bDebug) {
+              errHandle.Status("Attempting Histograph [3]: [" + lstResources.Count + "]");
+            }
+
+            for (int i = 0; i < lstResources.Count; i++) {
+              // Get access to this resource
+              XmlNode resThis = lstResources[i];
+              // Get the kind of web service used
+              String sService = "histograph";
+              if (resThis.Attributes["service"] != null)
+                sService = resThis.Attributes["service"].Value;
+              String resType = resThis.Attributes["types"].Value;
+              String sClassMatch = "yes";
+              String sHit = "true";
+              // Keep track of hits
+              this.loc_iHits++;
+
+              // Create a link object
+              link oLink = new link(sService, "",
+                resThis.Attributes["URI"].Value,
+                resThis.Attributes["surfaceForm"].Value,
+                resThis.Attributes["types"].Value,
+                sClassMatch,
+                resThis.Attributes["support"].Value,
+                resType,
+                resThis.Attributes["similarityScore"].Value,
+                resThis.Attributes["percentageOfSecondRank"].Value,
+                sHit);
+              // Add the link object to the list of what is returned
+              lstLinks.Add(oLink);
+
+            }
           }
         }
-        // Be positive
-        return true;
+        // Return the result we had (or not)
+        return bResult;
       } catch (Exception ex) {
         errHandle.DoError("entity/oneHistographRequest", ex); // Provide standard error message
         return false;
@@ -458,6 +543,7 @@ namespace FoliaEntity {
       String sXmlPost = "";
       String sMethod = "";
       String sData = "";
+      bool bResult = false;
       XmlWriterSettings wrSet = new XmlWriterSettings();
 
       try {
@@ -479,6 +565,8 @@ namespace FoliaEntity {
 
         // Check the reply and process it
         if (pdxReply != null && pdxReply.SelectSingleNode("./descendant::Resource").Attributes["URI"].Value != "") {
+          // Indicate we have a result
+          bResult = true;
           // Find a list of all <Resource> answers
           XmlNodeList lstResources = pdxReply.SelectNodes("./descendant::Resource");
           for (int i = 0; i < lstResources.Count; i++) {
@@ -539,7 +627,7 @@ namespace FoliaEntity {
         }
 
         // Be positive
-        return true;
+        return bResult;
       } catch (Exception ex) {
         errHandle.DoError("entity/oneLotusRequest", ex); // Provide standard error message
         return false;
@@ -573,6 +661,17 @@ namespace FoliaEntity {
           request.ContentType = "application/x-www-form-urlencoded";
           request.Accept = "application/json";
           sReturnLanguage = "json";
+          // Is this a HTTPS request?
+          if (sUrlStart.StartsWith("https")) {
+            ServicePointManager.ServerCertificateValidationCallback =
+              new System.Net.Security.RemoteCertificateValidationCallback(AcceptAllCertifications);
+          }
+
+
+          if (bDebug && sUrlStart.ToLower().Contains("histograph")) {
+            errHandle.Status("Attempting Histograph [4]: [" + sRequest + "?" + sData + "]");
+          }
+
         } else if (sUrlStart.ToLower().Contains("flask")) {
           // Prepare the data 
           postBytes = (new UTF8Encoding()).GetBytes(sData.ToString());
@@ -622,13 +721,20 @@ namespace FoliaEntity {
           response = (HttpWebResponse)request.GetResponse();
         } catch (Exception e) {
           if (this.bDebug) {
-            errHandle.Status("MakeXmlPostRequest does not work; Trying Html request instead.");
+            errHandle.Status("MakeXmlPostRequest does not work: " + e.Message);
           }
           return null;
         }
         // Process the result: get it as a string
         sReply = readResponse(ref response);
         XmlDocument pdxReply = new XmlDocument();
+
+        if (bDebug && sUrlStart.ToLower().Contains("histograph")) {
+          errHandle.Status("Attempting Histograph [5]: [" + sReply + "]");
+        }
+
+
+
         // Processing depends on the type
         switch (sReturnLanguage) {
           case "xml":
@@ -639,19 +745,24 @@ namespace FoliaEntity {
             // Check if this is a LOTUS (LOD-Laundromat) request
             if (sUrlStart.ToLower().Contains("lotus")) {
               // This is a LAUNDROMAT request
-              LotusResponse oLotus = Newtonsoft.Json.JsonConvert.DeserializeObject<LotusResponse>(sReply);
+              // LotusResponse oLotus = Newtonsoft.Json.JsonConvert.DeserializeObject<LotusResponse>(sReply);
+              XmlDocument pdxLotus = JsonConvert.DeserializeXmlNode(sReply.Replace("@", ""), "lotus");
               // Pre-load a response
               pdxReply.LoadXml(loc_sRespModel);
               // Find the correct node
               XmlNode ndxResource = pdxReply.SelectSingleNode("./descendant::Resource[1]");
               // Sanity check
               if (ndxResource != null) {
+                // Get the number of hits
+                int iHits = Int32.Parse( pdxLotus.SelectSingleNode("./descendant::returned").InnerText);
                 // Do we actually have results?
-                if (oLotus != null && oLotus.numhits > 0) {
+                // if (oLotus != null && oLotus.numhits > 0) {
+                if (iHits>0) {
                   // Fill in the values of this node
-                  LotusHit oHit = oLotus.hits[0];  // Take the first hit
+                  // LotusHit oHit = oLotus.hits[0];  // Take the first hit
+                  XmlNode ndxLotusHit = pdxLotus.SelectSingleNode("./descendant::hits[1]");
                   ndxResource.Attributes["service"].Value = "lotus";
-                  ndxResource.Attributes["URI"].Value = oHit.subject;
+                  ndxResource.Attributes["URI"].Value = ndxLotusHit.SelectSingleNode("./child::subject").InnerText; // oHit.subject;
                   ndxResource.Attributes["support"].Value = "1";
                   ndxResource.Attributes["types"].Value = "";
                   ndxResource.Attributes["surfaceForm"].Value = this.loc_sEntity;
@@ -682,7 +793,7 @@ namespace FoliaEntity {
                 // Must have a features[] array with at least one member
                 XmlNodeList ndxPits = pdxHisto.SelectNodes("./descendant-or-self::histograph/child::features[1]/child::properties[1]/child::pits");
                 // if (oHisto != null && oHisto.type == "FeatureCollection" && oHisto.features.Length > 0) {
-                if (ndxPits.Count>0) { }
+                if (ndxPits.Count>0) { 
                   // Walk through the results, finding the first one with type "hg:Place"
                   int iFound = 0;
                   //for (int j=0;j<oHisto.features.Length;j++) {
@@ -705,24 +816,44 @@ namespace FoliaEntity {
                     // Get this pit object
                     // HistoPit oPit = oFeatHit.properties[0].pits[j];
                     XmlNode ndxPit = ndxPits[j];
-                    // We can process only SOME of the pits
-                    // switch (oPit.dataset) {
-                    String sDataset = ndxPit.SelectSingleNode("./child::dataset").InnerText;
-                      switch (sDataset) {
-                      case "geonames":
-                        case "tgn":
-                        case "kloeke":
-                        case "whosonfirst":
-                          if (ndxNew.Attributes["service"].Value != "")
-                            ndxNew = ndxFirst.ParentNode.AppendChild(ndxFirst.CloneNode(true));
-                            //ndxNew.Attributes["service"].Value = "histograph:" + oPit.dataset;
-                            //ndxNew.Attributes["URI"].Value = oPit.uri;
-                          ndxNew.Attributes["service"].Value = "histograph:" + sDataset;
-                          ndxNew.Attributes["URI"].Value = ndxPit.SelectSingleNode("./child::uri").InnerText;
+                    // Get the type of this pit and get the NAME in this pit
+                    XmlNode ndxPitType = ndxPit.SelectSingleNode("./child::type");
+                    XmlNode ndxPitName = ndxPit.SelectSingleNode("./child::name");
+                    if (ndxPitType == null || ndxPitName == null) {
+                      int iStop = 1;
+                    } else {
+                      // Retrieve the pit's name and type
+                      String sPitType = ndxPitType.InnerText;
+                      String sPitName = ndxPitName.InnerText;
+                      switch (sPitType) {
+                        case "hg:Place":
+                        case "hg:Country":
+                          // Additional requirement: the original name must be INSIDE this name somehow
+                          if (sPitName.Contains(this.loc_sEntity) || (loc_sAltName != "" && sPitName.Contains(loc_sAltName) )) {
+                            // We can process only SOME of the pits
+                            String sDataset = ndxPit.SelectSingleNode("./child::dataset").InnerText;
+                            switch (sDataset) {
+                              case "geonames":
+                              case "tgn":
+                              case "kloeke":
+                              case "whosonfirst":
+                                if (ndxNew.Attributes["service"].Value != "")
+                                  ndxNew = ndxFirst.ParentNode.AppendChild(ndxFirst.CloneNode(true));
+                                //ndxNew.Attributes["service"].Value = "histograph:" + oPit.dataset;
+                                //ndxNew.Attributes["URI"].Value = oPit.uri;
+                                ndxNew.Attributes["service"].Value = "histograph:" + sDataset;
+                                ndxNew.Attributes["URI"].Value = ndxPit.SelectSingleNode("./child::uri").InnerText;
+                                break;
+                            }
+                          }
                           break;
                       }
                     }
-                // }
+                  }
+                 } else {
+                  // Nothing has been found
+                  pdxReply = null;
+                }
               }
             }
             break;
