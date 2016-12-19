@@ -46,6 +46,13 @@ namespace FoliaEntity {
       this.set_method(sMethods);
     }
 
+    private String stripFinalSlash(String sDirIn) {
+      if (sDirIn.EndsWith("/") || sDirIn.EndsWith("\\")) {
+        sDirIn = sDirIn.Substring(0, sDirIn.Length - 1);
+      }
+      return sDirIn;
+    }
+
     /* -------------------------------------------------------------------------------------
      * Name:        ParseOneFoliaEntity
      * Goal:        Master routine to parse one folia.xml Dutch file (Sonar + Lassy)
@@ -77,6 +84,7 @@ namespace FoliaEntity {
       String sFileShort = "";     // Short file name
       StringWriter swText = null; // The whole text of the document (as context)
       List<String> lstEntExpr;    // List of named entity expressions
+      List<String> lstEntModern;  // List of modernized named entity expressions
       List<int> lstEntIdx;        // List of indices of these named entity expressions
       List<link> lstEntFlask;     // Flask answer
       int iTextLength = 0;        // Length of the text
@@ -84,16 +92,42 @@ namespace FoliaEntity {
       try {
         // Validate
         if (!File.Exists(sFileIn)) return false;
+
+        String sSubDir = sDirOut;
         // Make sure dirout does not contain a trailing /
-        if (sDirOut.EndsWith("/") || sDirOut.EndsWith("\\"))
-          sDirOut = sDirOut.Substring(0, sDirOut.Length - 1);
+        sDirOut = stripFinalSlash(sDirOut);
         // Construct output file name
         sFileShort = Path.GetFileName(sFileIn);
-        String sSubDir = sDirOut;
-        if (Directory.Exists(sDirIn)) {
-          String sFileInDir = Path.GetDirectoryName(sFileIn);
-          sSubDir += sFileInDir.Substring(sDirIn.Length) ;
+        sSubDir = sDirOut;
+
+        try {
+          if (Directory.Exists(sDirIn)) {
+            sDirIn = stripFinalSlash( Path.GetFullPath(sDirIn));
+            String sFileInDir = stripFinalSlash(Path.GetDirectoryName(sFileIn));
+            //errHandle.Status("sFileInDir = [" + sFileInDir + "]");
+            //errHandle.Status("sDirIn     = [" + sDirIn + "]");
+            if (sFileInDir.Length == sDirIn.Length) {
+              // errHandle.Status("true");
+            } else {
+              // errHandle.Status("false");
+              sSubDir += sFileInDir.Substring(sDirIn.Length);
+            }
+            sSubDir = stripFinalSlash(sSubDir);
+          }
+        } catch (Exception ex) {
+          errHandle.Status("sDirIn     = [" + sDirIn + "]");
+          errHandle.Status("sDirOut    = [" + sDirOut + "]");
+          errHandle.Status("sFileShort = [" + sFileShort + "]");
+          errHandle.Status("sSubDir    = [" + sSubDir + "]");
+          errHandle.DoError("ParseOneFoliaEntity/chk0", ex); // Provide standard error message
+          return false;
         }
+
+        //// =========== DEBUG ====================
+        //errHandle.Status("sDirIn     = [" + sDirIn + "]");
+        //errHandle.Status("sDirOut    = [" + sDirOut + "]");
+        //errHandle.Status("sFileShort = [" + sFileShort + "]");
+        //errHandle.Status("sSubDir    = [" + sSubDir + "]");
 
         // Is this a one-pass or two-pass execution?
         if (bFlask)
@@ -101,6 +135,10 @@ namespace FoliaEntity {
 
         String sFileOut = Path.GetFullPath(sSubDir + "/" + sFileShort);
         this.loc_sDirOut = sDirOut;
+
+        // ====================== DEBUG ==========================
+        //errHandle.Status("sFileOut = [" + sFileOut + "]");
+        //errHandle.Status("sDirOut  = [" + sDirOut + "]");
 
         // Determine FileTmp, depending on the pass-method
         String sFileTmp = "";
@@ -128,12 +166,17 @@ namespace FoliaEntity {
         wrSet.Indent = true;
         wrSet.NewLineHandling = NewLineHandling.Replace;
         wrSet.NamespaceHandling = NamespaceHandling.OmitDuplicates;
+
+        // Set XML reader settings
+        XmlReaderSettings rdSet = new XmlReaderSettings();
+        rdSet.DtdProcessing = DtdProcessing.Parse;
         // wrSet.ConformanceLevel = ConformanceLevel.Auto;
         iHits = 0;
         iFail = 0;
         // wrSet.NewLineOnAttributes = true;
 
         lstEntExpr = new List<String>();  // List of named-entities
+        lstEntModern = new List<String>();// List of modernized named-entities
         lstEntIdx = new List<int>();      // List of named-entity positions
         lstEntFlask = new List<link>();   // List of links found by FLASK
 
@@ -160,7 +203,7 @@ namespace FoliaEntity {
         }
 
         // Open input file and output file
-        using (rdFolia = XmlReader.Create(new StreamReader(sFileIn))) {
+        using (rdFolia = XmlReader.Create(new StreamReader(sFileIn), rdSet)) {
           StreamWriter wrText = new StreamWriter(sFileTmp);
           swText = new StringWriter();      // Storage for the whole text context
           using (wrFolia = XmlWriter.Create(wrText, wrSet)) {
@@ -210,6 +253,8 @@ namespace FoliaEntity {
                   List<XmlNode> lstW = oXmlTools.FixList(ndxFoliaS.SelectNodes("./descendant::df:w/child::df:t", nsFolia));
                   // (6) preparations: retrieve the @xml:id attribute for logging
                   String sSentId = ndxFoliaS.Attributes["xml:id"].Value;
+                  // (7) Check for presence of modernization layer
+                  bool bDoModern = (ndxFoliaS.SelectSingleNode("./descendant::df:w/child::df:alignment[@class='modernization']", nsFolia) != null);
 
                   // We also need to get the full sentence text
                   String sSent = "";
@@ -219,12 +264,18 @@ namespace FoliaEntity {
                     // (6) Combine the WORDS within the entity ref into a string
                     List<XmlNode> lstEntW = oXmlTools.FixList(lstEnt[j].SelectNodes("./child::df:wref", nsFolia));
                     String sEntity = ""; String idStart = "";
+                    // Keep track of a possible MODERN (vernederlandsd) variant
+                    String sModern = "";  List<String> lstId = new List<string>();
                     for (int k = 0; k < lstEntW.Count; k++) {
                       if (sEntity == "") {
                         // Note the start id of the entity
                         idStart = lstEntW[k].Attributes["id"].Value;
                       } else sEntity += " ";
                       sEntity += lstEntW[k].Attributes["t"].Value;
+                      // Add the id to the list of id's (needed for the modernized layer)
+                      if (bDoModern) {
+                        lstId.Add(lstEntW[k].Attributes["id"].Value);
+                      }
                     }
                     // (6b) Log the fact that we are processing this sentence
                     if (bIsDebug) {
@@ -232,7 +283,7 @@ namespace FoliaEntity {
                     }
 
                     // (7) Calculate the offset for this particular entity as well as the sentence string
-                    int iOffset = 0;
+                    int iOffset = 0; int iModern = 0;
                     for (int k = 0; k < lstW.Count; k++) {
                       // Make sure spaces are added at the appropriate places
                       if (sSent != "") sSent += " ";
@@ -242,10 +293,34 @@ namespace FoliaEntity {
                       }
                       // Extend the sentence
                       sSent += lstW[k].InnerText;
+                      // Check for modernized entity name
+                      if (bDoModern && iModern < lstId.Count) {
+                        // Check if this id should be treated
+                        String sIdK = lstW[k].ParentNode.Attributes["xml:id"].Value;
+                        String sIdM = lstId[iModern];
+                        int iPos = sIdM.Length - sIdK.Length;
+                        // ============== DEBUG ================
+                        //errHandle.Status("iPos = " + iPos + "sIdK=[" + sIdK + "] sIdM=[" + sIdM + "]\n");
+                        try {
+                          if (iPos >= 0 && sIdM.Substring(iPos) == sIdK) {
+                            // Look for the modernized word
+                            XmlNode ndxAref = lstW[k].SelectSingleNode("./parent::df:w/child::df:alignment[@class='modernization']/child::df:aref", nsFolia);
+                            if (ndxAref != null) {
+                              if (sModern != "") sModern += " ";
+                              sModern += ndxAref.Attributes["t"].Value;
+                            }
+                            iModern++;
+                          }
+                        } catch (Exception ex) {
+                          errHandle.DoError("ParseOneFoliaEntity/chk1", ex); // Provide standard error message
+                          return false;
+                        }
+                      }
                     }
 
                     // Process the named entity and the position within the larger text
                     lstEntExpr.Add(sEntity);
+                    lstEntModern.Add(sModern);
                     lstEntIdx.Add(iOffset + iTextLength);
 
                     // Removing previous alignments depends on the method used
@@ -257,12 +332,19 @@ namespace FoliaEntity {
 
                     // Create an entity object to be processed
                     String sClass = lstEnt[j].Attributes["class"].Value;
-                    entity oEntity = new entity(this.errHandle, sEntity, sClass, sSent, iOffset.ToString(), idStart);
+                    String sEntityCreate = (bDoModern && sModern != "") ? sModern : sEntity;
+                    entity oEntity = new entity(this.errHandle, sEntityCreate, sClass, sSent, iOffset.ToString(), idStart);
                     oEntity.set_debug(bIsDebug);
                     // Pass on the settings of the different SINGLE_PASS methods
                     oEntity.set_histograph(bHistograph);
                     oEntity.set_laundromat(bLaundromat);
                     oEntity.set_spotlight(bSpotlight);
+
+                    // ============== DEBUG ===================
+                    //if (sModern.ToLower().Contains("jaarboek")) {
+                    //  int iStop = 1;
+                    //}
+                    // ========================================
 
                     if (oEntity.oneEntityToLinks(sConfidence)) {
                       // Keep track of hits and failures
@@ -270,7 +352,7 @@ namespace FoliaEntity {
                       iFail += oEntity.get_fail();
                       // Process the alignments that have been found
                       List<link> lstAlign = oEntity.get_links();
-                      for (int k=0;k<lstAlign.Count;k++) {
+                      for (int k = 0; k < lstAlign.Count; k++) {
                         // Process this link
                         link lnkThis = lstAlign[k];
                         // Convert this link into an <alignment> item and add it to the current <entity>

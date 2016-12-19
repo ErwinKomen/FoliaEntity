@@ -260,67 +260,73 @@ namespace FoliaEntity {
           String sEntity = this.loc_sEntity;
           // Find a list of all <Resource> answers
           XmlNodeList lstResources = pdxReply.SelectNodes("./descendant::Resource");
-          for (int i=0;i<lstResources.Count;i++) {
-            // Get access to this resource
-            XmlNode resThis = lstResources[i];
-            // Get the kind of web service used
-            String sService = "spotlight";
-            if (resThis.Attributes["service"] != null)
-              sService = resThis.Attributes["service"].Value;
-            // Calculate 'found' and 'classmatch'
-            String eClass = this.loc_sClass;
-            String resType = resThis.Attributes["types"].Value;
-            String sClassMatch = "no";
-            String sHit = "";
-            bool bFound = false;
-            switch (eClass) {
-              case "loc":   // location
-                if (resType == "" || resType.Contains(":Place")) { bFound = true; sClassMatch = "yes"; }
-                break;
-              case "org":   // organization
-                if (resType == "" || resType.Contains("Organization") || resType.Contains("Organisation")) { bFound = true; sClassMatch = "yes"; }
-                break;
-              case "pro":   // product
-                if (resType == "" || resType.Contains(":Language")) { bFound = true; sClassMatch = "yes"; }
-                break;
-              case "per":   // person
-                if (resType == "" || resType.Contains(":Agent")) { bFound = true; sClassMatch = "yes"; }
-                break;
-              case "misc":  // miscellaneous
-                bFound = true; sClassMatch = "misc";
-                break;
-              default:      // Anything else
-                if (resType == "") { bFound = true; sClassMatch = "empty"; }
-                break;
+          if (lstResources.Count == 0) {
+            // Nothing has been found, so make a link that says this
+            lstLinks.Add(new link("spotlight", false));
+            this.loc_iFail++;
+          } else {
+            for (int i = 0; i < lstResources.Count; i++) {
+              // Get access to this resource
+              XmlNode resThis = lstResources[i];
+              // Get the kind of web service used
+              String sService = "spotlight";
+              if (resThis.Attributes["service"] != null)
+                sService = resThis.Attributes["service"].Value;
+              // Calculate 'found' and 'classmatch'
+              String eClass = this.loc_sClass;
+              String resType = resThis.Attributes["types"].Value;
+              String sClassMatch = "no";
+              String sHit = "";
+              bool bFound = false;
+              switch (eClass) {
+                case "loc":   // location
+                  if (resType == "" || resType.Contains(":Place")) { bFound = true; sClassMatch = "yes"; }
+                  break;
+                case "org":   // organization
+                  if (resType == "" || resType.Contains("Organization") || resType.Contains("Organisation")) { bFound = true; sClassMatch = "yes"; }
+                  break;
+                case "pro":   // product
+                  if (resType == "" || resType.Contains(":Language")) { bFound = true; sClassMatch = "yes"; }
+                  break;
+                case "per":   // person
+                  if (resType == "" || resType.Contains(":Agent")) { bFound = true; sClassMatch = "yes"; }
+                  break;
+                case "misc":  // miscellaneous
+                  bFound = true; sClassMatch = "misc";
+                  break;
+                default:      // Anything else
+                  if (resType == "") { bFound = true; sClassMatch = "empty"; }
+                  break;
+              }
+
+              // Do we have a hit?
+              if (bFound) {
+                this.loc_iHits++; sHit = "true";
+              } else {
+                this.loc_iFail++; sHit = "false";
+              }
+
+              // Create a link object
+              link oLink = new link(sService, sMethod,
+                resThis.Attributes["URI"].Value,
+                resThis.Attributes["surfaceForm"].Value,
+                resThis.Attributes["types"].Value,
+                sClassMatch,
+                resThis.Attributes["support"].Value,
+                resType,
+                resThis.Attributes["similarityScore"].Value,
+                resThis.Attributes["percentageOfSecondRank"].Value,
+                sHit);
+              // Add the link object to the list of what is returned
+              lstLinks.Add(oLink);
+
+              // ================ DEBUG ===============
+              //if (this.loc_sEntity.Contains("Vlaanderen")) {
+              //  int j = 0;
+              //}
+              // ======================================
+
             }
-
-            // Do we have a hit?
-            if (bFound) {
-              this.loc_iHits++; sHit = "true";
-            } else {
-              this.loc_iFail++; sHit = "false";
-            }
-
-            // Create a link object
-            link oLink = new link(sService, sMethod,
-              resThis.Attributes["URI"].Value,
-              resThis.Attributes["surfaceForm"].Value, 
-              resThis.Attributes["types"].Value,
-              sClassMatch, 
-              resThis.Attributes["support"].Value, 
-              resType,
-              resThis.Attributes["similarityScore"].Value, 
-              resThis.Attributes["percentageOfSecondRank"].Value,
-              sHit);
-            // Add the link object to the list of what is returned
-            lstLinks.Add(oLink);
-
-            // ================ DEBUG ===============
-            //if (this.loc_sEntity.Contains("Vlaanderen")) {
-            //  int j = 0;
-            //}
-            // ======================================
-
           }
         }
 
@@ -367,67 +373,73 @@ namespace FoliaEntity {
         if (pdxReply != null) {
           // Find a list of all <Resource> answers
           XmlNodeList lstResources = pdxReply.SelectNodes("./descendant::Resource");
-          for (int i = 0; i < lstResources.Count; i++) {
-            // Get access to this resource
-            XmlNode resThis = lstResources[i];
-            // Get the kind of web service used
-            String sService = "flask";
-            if (resThis.Attributes["service"] != null)
-              sService = resThis.Attributes["service"].Value;
-            // Calculate 'found' and 'classmatch'
-            String eClass = this.loc_sClass;
-            String resType = resThis.Attributes["types"].Value;
-            String sClassMatch = "no";
-            String sHit = "";
-            bool bFound = false;
-            switch (eClass) {
-              case "loc":   // location
-                if (resType == "" || resType.Contains(":Place")) { bFound = true; sClassMatch = "yes"; }
-                break;
-              case "org":   // organization
-                if (resType == "" || resType.Contains("Organization") || resType.Contains("Organisation")) { bFound = true; sClassMatch = "yes"; }
-                break;
-              case "pro":   // product
-                if (resType == "" || resType.Contains(":Language")) { bFound = true; sClassMatch = "yes"; }
-                break;
-              case "per":   // person
-                if (resType == "" || resType.Contains(":Agent")) { bFound = true; sClassMatch = "yes"; }
-                break;
-              case "misc":  // miscellaneous
-                bFound = true; sClassMatch = "misc";
-                break;
-              default:      // Anything else
-                if (resType == "") { bFound = true; sClassMatch = "empty"; }
-                break;
+          if (lstResources.Count == 0) {
+            // Nothing has been found, so make a link that says this
+            lstLinks.Add(new link("flask", false));
+            this.loc_iFail++;
+          } else {
+            for (int i = 0; i < lstResources.Count; i++) {
+              // Get access to this resource
+              XmlNode resThis = lstResources[i];
+              // Get the kind of web service used
+              String sService = "flask";
+              if (resThis.Attributes["service"] != null)
+                sService = resThis.Attributes["service"].Value;
+              // Calculate 'found' and 'classmatch'
+              String eClass = this.loc_sClass;
+              String resType = resThis.Attributes["types"].Value;
+              String sClassMatch = "no";
+              String sHit = "";
+              bool bFound = false;
+              switch (eClass) {
+                case "loc":   // location
+                  if (resType == "" || resType.Contains(":Place")) { bFound = true; sClassMatch = "yes"; }
+                  break;
+                case "org":   // organization
+                  if (resType == "" || resType.Contains("Organization") || resType.Contains("Organisation")) { bFound = true; sClassMatch = "yes"; }
+                  break;
+                case "pro":   // product
+                  if (resType == "" || resType.Contains(":Language")) { bFound = true; sClassMatch = "yes"; }
+                  break;
+                case "per":   // person
+                  if (resType == "" || resType.Contains(":Agent")) { bFound = true; sClassMatch = "yes"; }
+                  break;
+                case "misc":  // miscellaneous
+                  bFound = true; sClassMatch = "misc";
+                  break;
+                default:      // Anything else
+                  if (resType == "") { bFound = true; sClassMatch = "empty"; }
+                  break;
+              }
+
+              // Do we have a hit?
+              if (bFound) {
+                this.loc_iHits++; sHit = "true";
+              } else {
+                this.loc_iFail++; sHit = "false";
+              }
+
+              // Create a link object
+              link oLink = new link(sService, "",
+                resThis.Attributes["URI"].Value,
+                resThis.Attributes["surfaceForm"].Value,
+                resThis.Attributes["types"].Value,
+                sClassMatch,
+                resThis.Attributes["support"].Value,
+                resType,
+                resThis.Attributes["similarityScore"].Value,
+                resThis.Attributes["percentageOfSecondRank"].Value,
+                sHit);
+              // Add the link object to the list of what is returned
+              lstLinks.Add(oLink);
+
+              // ================ DEBUG ===============
+              //if (this.loc_sEntity.Contains("Vlaanderen")) {
+              //  int j = 0;
+              //}
+              // ======================================
+
             }
-
-            // Do we have a hit?
-            if (bFound) {
-              this.loc_iHits++; sHit = "true";
-            } else {
-              this.loc_iFail++; sHit = "false";
-            }
-
-            // Create a link object
-            link oLink = new link(sService, "",
-              resThis.Attributes["URI"].Value,
-              resThis.Attributes["surfaceForm"].Value,
-              resThis.Attributes["types"].Value,
-              sClassMatch,
-              resThis.Attributes["support"].Value,
-              resType,
-              resThis.Attributes["similarityScore"].Value,
-              resThis.Attributes["percentageOfSecondRank"].Value,
-              sHit);
-            // Add the link object to the list of what is returned
-            lstLinks.Add(oLink);
-
-            // ================ DEBUG ===============
-            //if (this.loc_sEntity.Contains("Vlaanderen")) {
-            //  int j = 0;
-            //}
-            // ======================================
-
           }
         }
 
@@ -492,34 +504,39 @@ namespace FoliaEntity {
             if (bDebug) {
               errHandle.Status("Attempting Histograph [3]: [" + lstResources.Count + "]");
             }
+            if (lstResources.Count == 0) {
+              // Nothing has been found, so make a link that says this
+              lstLinks.Add(new link("histograph", false));
+              this.loc_iFail++;
+            } else {
+              for (int i = 0; i < lstResources.Count; i++) {
+                // Get access to this resource
+                XmlNode resThis = lstResources[i];
+                // Get the kind of web service used
+                String sService = "histograph";
+                if (resThis.Attributes["service"] != null)
+                  sService = resThis.Attributes["service"].Value;
+                String resType = resThis.Attributes["types"].Value;
+                String sClassMatch = "yes";
+                String sHit = "true";
+                // Keep track of hits
+                this.loc_iHits++;
 
-            for (int i = 0; i < lstResources.Count; i++) {
-              // Get access to this resource
-              XmlNode resThis = lstResources[i];
-              // Get the kind of web service used
-              String sService = "histograph";
-              if (resThis.Attributes["service"] != null)
-                sService = resThis.Attributes["service"].Value;
-              String resType = resThis.Attributes["types"].Value;
-              String sClassMatch = "yes";
-              String sHit = "true";
-              // Keep track of hits
-              this.loc_iHits++;
+                // Create a link object
+                link oLink = new link(sService, "",
+                  resThis.Attributes["URI"].Value,
+                  resThis.Attributes["surfaceForm"].Value,
+                  resThis.Attributes["types"].Value,
+                  sClassMatch,
+                  resThis.Attributes["support"].Value,
+                  resType,
+                  resThis.Attributes["similarityScore"].Value,
+                  resThis.Attributes["percentageOfSecondRank"].Value,
+                  sHit);
+                // Add the link object to the list of what is returned
+                lstLinks.Add(oLink);
 
-              // Create a link object
-              link oLink = new link(sService, "",
-                resThis.Attributes["URI"].Value,
-                resThis.Attributes["surfaceForm"].Value,
-                resThis.Attributes["types"].Value,
-                sClassMatch,
-                resThis.Attributes["support"].Value,
-                resType,
-                resThis.Attributes["similarityScore"].Value,
-                resThis.Attributes["percentageOfSecondRank"].Value,
-                sHit);
-              // Add the link object to the list of what is returned
-              lstLinks.Add(oLink);
-
+              }
             }
           }
         }
@@ -569,60 +586,66 @@ namespace FoliaEntity {
           bResult = true;
           // Find a list of all <Resource> answers
           XmlNodeList lstResources = pdxReply.SelectNodes("./descendant::Resource");
-          for (int i = 0; i < lstResources.Count; i++) {
-            // Get access to this resource
-            XmlNode resThis = lstResources[i];
-            // Calculate 'found' and 'classmatch'
-            String eClass = this.loc_sClass;
-            String resType = resThis.Attributes["types"].Value;
-            String sClassMatch = "no";
-            String sHit = "";
-            bool bFound = false;
-            switch (eClass) {
-              case "loc":   // location
-                if (resType == "" || resType.Contains(":Place")) { bFound = true; sClassMatch = "yes"; }
-                break;
-              case "org":   // organization
-                if (resType == "" || resType.Contains("Organization") || resType.Contains("Organisation")) { bFound = true; sClassMatch = "yes"; }
-                break;
-              case "pro":   // product
-                if (resType == "" || resType.Contains(":Language")) { bFound = true; sClassMatch = "yes"; }
-                break;
-              case "per":   // person
-                if (resType == "" || resType.Contains(":Agent")) { bFound = true; sClassMatch = "yes"; }
-                break;
-              case "misc":  // miscellaneous
-                bFound = true; sClassMatch = "misc";
-                break;
-              default:      // Anything else
-                if (resType == "") { bFound = true; sClassMatch = "empty"; }
-                break;
-            }
+          if (lstResources.Count == 0) {
+            // Nothing has been found, so make a link that says this
+            lstLinks.Add(new link("lotus", false));
+            this.loc_iFail++;
+          } else {
+            for (int i = 0; i < lstResources.Count; i++) {
+              // Get access to this resource
+              XmlNode resThis = lstResources[i];
+              // Calculate 'found' and 'classmatch'
+              String eClass = this.loc_sClass;
+              String resType = resThis.Attributes["types"].Value;
+              String sClassMatch = "no";
+              String sHit = "";
+              bool bFound = false;
+              switch (eClass) {
+                case "loc":   // location
+                  if (resType == "" || resType.Contains(":Place")) { bFound = true; sClassMatch = "yes"; }
+                  break;
+                case "org":   // organization
+                  if (resType == "" || resType.Contains("Organization") || resType.Contains("Organisation")) { bFound = true; sClassMatch = "yes"; }
+                  break;
+                case "pro":   // product
+                  if (resType == "" || resType.Contains(":Language")) { bFound = true; sClassMatch = "yes"; }
+                  break;
+                case "per":   // person
+                  if (resType == "" || resType.Contains(":Agent")) { bFound = true; sClassMatch = "yes"; }
+                  break;
+                case "misc":  // miscellaneous
+                  bFound = true; sClassMatch = "misc";
+                  break;
+                default:      // Anything else
+                  if (resType == "") { bFound = true; sClassMatch = "empty"; }
+                  break;
+              }
 
-            // Do we have a hit?
-            if (bFound) {
-              this.loc_iHits++; sHit = "true";
-            } else {
-              this.loc_iFail++; sHit = "false";
-            }
+              // Do we have a hit?
+              if (bFound) {
+                this.loc_iHits++; sHit = "true";
+              } else {
+                this.loc_iFail++; sHit = "false";
+              }
 
-            // Create a link object
-            link oLink = new link("lotus", sMethod,
-              resThis.Attributes["URI"].Value,
-              resThis.Attributes["surfaceForm"].Value,
-              resThis.Attributes["types"].Value,
-              sClassMatch,
-              resThis.Attributes["support"].Value,
-              resType,
-              resThis.Attributes["similarityScore"].Value,
-              resThis.Attributes["percentageOfSecondRank"].Value,
-              sHit);
-            // Should we add this?
-            if (lstLinks.Count == 0 || (lstLinks.Count>0 && lstLinks[0].uri != oLink.uri && oLink.uri != "")) {
-              // Add the link object to the list of what is returned
-              lstLinks.Add(oLink);
-            }
+              // Create a link object
+              link oLink = new link("lotus", sMethod,
+                resThis.Attributes["URI"].Value,
+                resThis.Attributes["surfaceForm"].Value,
+                resThis.Attributes["types"].Value,
+                sClassMatch,
+                resThis.Attributes["support"].Value,
+                resType,
+                resThis.Attributes["similarityScore"].Value,
+                resThis.Attributes["percentageOfSecondRank"].Value,
+                sHit);
+              // Should we add this?
+              if (lstLinks.Count == 0 || (lstLinks.Count > 0 && lstLinks[0].uri != oLink.uri && oLink.uri != "")) {
+                // Add the link object to the list of what is returned
+                lstLinks.Add(oLink);
+              }
 
+            }
           }
         }
 
@@ -1014,6 +1037,7 @@ namespace FoliaEntity {
     public String similarityScore = "";
     public String percentageOfSecondRank = "";
     public String hit = "";
+    public bool bFound = false;
     public link(String sService, String sMethod, String sUri, String sForm, String sType, String sClassmatch, String sSupport, String sOffset, 
       String sSimilarityScore, String sPercentageOfSecondRank, String sHit) {
       this.service = sService;
@@ -1026,12 +1050,19 @@ namespace FoliaEntity {
       this.similarityScore = sSimilarityScore;
       this.percentageOfSecondRank = sPercentageOfSecondRank;
       this.hit = sHit;
+      this.bFound = true;
+    }
+    public link(String sService, bool bHit) {
+      this.bFound = bHit;
+      this.service = sService;
+      this.classmatch = "false";
+      this.hit = "false";
     }
 
     public String toCsv() {
       // Return all the elements, but make sure the HIT (boolean) is first
       return this.hit + "\t" + this.service + "\t" + this.method + "\t" + this.uri + "\t" + this.form + "\t" + 
-        this.classmatch + "\t" + this.support +
+        this.classmatch + "\t" + this.support + "\t" +
         this.offset + "\t" + this.similarityScore + "\t" + this.percentageOfSecondRank;
     }
   }
