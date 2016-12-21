@@ -82,16 +82,27 @@ namespace FoliaEntity {
       util.xmlTools oXmlTools = new util.xmlTools(errHandle);
       String sConfidence = "0.20";
       String sFileShort = "";     // Short file name
+      String sFileInZip = "";     // Zipped file name (if gz exists)
       StringWriter swText = null; // The whole text of the document (as context)
       List<String> lstEntExpr;    // List of named entity expressions
       List<String> lstEntModern;  // List of modernized named entity expressions
       List<int> lstEntIdx;        // List of indices of these named entity expressions
       List<link> lstEntFlask;     // Flask answer
       int iTextLength = 0;        // Length of the text
+      bool bZipped = false;       // A zipped file is used
 
       try {
         // Validate
         if (!File.Exists(sFileIn)) return false;
+
+        // Check if it is zipped
+        if (sFileIn.EndsWith(".gz")) {
+          // Input file is zipped --> unzip it
+          sFileInZip = sFileIn;
+          sFileIn = sFileInZip.Substring(0, sFileInZip.Length - 3);
+          util.General.DecompressFile(sFileInZip, sFileIn);
+          bZipped = true;
+        }
 
         String sSubDir = sDirOut;
         // Make sure dirout does not contain a trailing /
@@ -112,7 +123,7 @@ namespace FoliaEntity {
               // errHandle.Status("false");
               sSubDir += sFileInDir.Substring(sDirIn.Length);
             }
-            sSubDir = stripFinalSlash(sSubDir);
+            sSubDir = System.IO.Path.GetFullPath( stripFinalSlash(sSubDir));
           }
         } catch (Exception ex) {
           errHandle.Status("sDirIn     = [" + sDirIn + "]");
@@ -121,6 +132,11 @@ namespace FoliaEntity {
           errHandle.Status("sSubDir    = [" + sSubDir + "]");
           errHandle.DoError("ParseOneFoliaEntity/chk0", ex); // Provide standard error message
           return false;
+        }
+
+        // Make sure the output directory exists
+        if (!Directory.Exists(sSubDir)) {
+          Directory.CreateDirectory(sSubDir);
         }
 
         //// =========== DEBUG ====================
@@ -547,6 +563,12 @@ namespace FoliaEntity {
           if (bTwoPass) {
             File.Delete(sFileTmp);
           }
+        }
+
+        // Check if a zipped file has been unpacked
+        if (bZipped && File.Exists(sFileInZip) && File.Exists(sFileIn)) {
+          // We have a zipped and unzipped version --> remove the unzipped version
+          File.Delete(sFileIn);
         }
 
 

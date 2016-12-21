@@ -93,10 +93,13 @@ namespace FoliaEntity {
           if (sInput == sOutput) { SyntaxError("3"); return; }
           // Get all files in this dir
           // arInput = Directory.GetFiles(sInput, "*.folia.xml", SearchOption.AllDirectories);
-          List<String> lstInput = General.getFilesSorted(sInput, "*.folia.xml", "name");
-          if (lstInput==null) {
-            errHandle.Status("Could not sort files\n");
-            return;
+          List<String> lstInput = General.getFilesSorted(sInput, "*.folia.xml.gz", "name");
+          if (lstInput==null || lstInput.Count == 0) {
+            lstInput = General.getFilesSorted(sInput, "*.folia.xml", "name");
+            if (lstInput == null) {
+              errHandle.Status("Could not sort files\n");
+              return;
+            }
           }
           arInput = lstInput.ToArray();
         } else {
