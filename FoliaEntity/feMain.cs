@@ -114,7 +114,8 @@ namespace FoliaEntity {
           Directory.CreateDirectory(sOutput);
         }
         // Create output log file
-        sLogFile = Path.GetFullPath( "./foliaentity.log");
+        String sDate = DateTime.Now.ToString("yyyyMMdd_H-mm-ss");
+        sLogFile = Path.GetFullPath( "./foliaentity"+ sDate + ".log");
         if (File.Exists(sLogFile)) {
           File.WriteAllText(sLogFile, "");
         }

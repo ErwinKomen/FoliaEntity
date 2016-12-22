@@ -140,6 +140,46 @@ namespace FoliaEntity.util {
       }
     }
 
+
+    /// <summary>
+    /// File-to-file buffered Compression
+    /// </summary>
+    /// <param name="sFileIn"></param>
+    /// <param name="sFileOut"></param>
+    /// <returns></returns>
+    public static bool CompressFile(String sFileIn, String sFileOut) {
+      const int size = 8192;
+      byte[] buffer = new byte[size];
+
+      try {
+        using (FileStream fDecom = new FileStream(sFileIn, FileMode.Open, FileAccess.Read))
+        using (FileStream fCompr = new FileStream(sFileOut, FileMode.Create, FileAccess.Write))
+        using (GZipStream alg = new GZipStream(fCompr, CompressionMode.Compress)) {
+          int bytesRead = 0;
+          do {
+            // Read buffer
+            bytesRead = fDecom.Read(buffer, 0, buffer.Length);
+            // Write buffer away
+            if (bytesRead > 0) alg.Write(buffer, 0, bytesRead);
+
+          } while (bytesRead > 0);
+          // finish writing
+          alg.Flush();
+          alg.Close(); alg.Dispose();
+          // Finish reading
+          fCompr.Close();
+          fDecom.Close(); fDecom.Dispose();
+        }
+        // Return success
+        return true;
+      } catch (Exception ex) {
+        ErrHandle.HandleErr("CompressFile", ex);
+        // Return failure
+        return false;
+      }
+    }
+
+
     /// <summary>
     /// File-to-file buffered decompression
     /// </summary>

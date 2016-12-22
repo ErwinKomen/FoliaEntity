@@ -83,6 +83,7 @@ namespace FoliaEntity {
       String sConfidence = "0.20";
       String sFileShort = "";     // Short file name
       String sFileInZip = "";     // Zipped file name (if gz exists)
+      String sFileLock = "";      // File lock
       StringWriter swText = null; // The whole text of the document (as context)
       List<String> lstEntExpr;    // List of named entity expressions
       List<String> lstEntModern;  // List of modernized named entity expressions
@@ -115,8 +116,6 @@ namespace FoliaEntity {
           if (Directory.Exists(sDirIn)) {
             sDirIn = stripFinalSlash( Path.GetFullPath(sDirIn));
             String sFileInDir = stripFinalSlash(Path.GetDirectoryName(sFileIn));
-            //errHandle.Status("sFileInDir = [" + sFileInDir + "]");
-            //errHandle.Status("sDirIn     = [" + sDirIn + "]");
             if (sFileInDir.Length == sDirIn.Length) {
               // errHandle.Status("true");
             } else {
@@ -139,22 +138,13 @@ namespace FoliaEntity {
           Directory.CreateDirectory(sSubDir);
         }
 
-        //// =========== DEBUG ====================
-        //errHandle.Status("sDirIn     = [" + sDirIn + "]");
-        //errHandle.Status("sDirOut    = [" + sDirOut + "]");
-        //errHandle.Status("sFileShort = [" + sFileShort + "]");
-        //errHandle.Status("sSubDir    = [" + sSubDir + "]");
-
         // Is this a one-pass or two-pass execution?
         if (bFlask)
           bTwoPass = true;
 
         String sFileOut = Path.GetFullPath(sSubDir + "/" + sFileShort);
+        String sFileOutGz = sFileOut + ".gz";
         this.loc_sDirOut = sDirOut;
-
-        // ====================== DEBUG ==========================
-        //errHandle.Status("sFileOut = [" + sFileOut + "]");
-        //errHandle.Status("sDirOut  = [" + sDirOut + "]");
 
         // Determine FileTmp, depending on the pass-method
         String sFileTmp = "";
@@ -165,7 +155,20 @@ namespace FoliaEntity {
         }
 
         // If the output file is already there: skip it
-        if (!bOverwrite && File.Exists(sFileOut)) { debug("Skip existing [" + sFileOut + "]"); return true; }
+        if (!bOverwrite && (File.Exists(sFileOut) || File.Exists(sFileOutGz))) {
+          debug("Skip existing [" + sFileOut + "]"); return true;
+        }
+
+        // Check for file-lock
+        sFileLock = sFileOut + ".lock";
+        if (File.Exists(sFileLock)) {
+          // File is locked, so leave immediately
+          debug("Skip locked [" + sFileOut + "]");
+          return true;
+        } else {
+          // Lock the file as soon as possible
+          File.WriteAllText(sFileLock, "");
+        }
 
         // Some kind of logging to see what is going on
         if (bIsDebug) {
@@ -205,18 +208,19 @@ namespace FoliaEntity {
         //     b. NE-links are then determined with the information from (a)
         //     c. Second pass adds the found information for each NE
 
-        // Open the input file
-        debug("Starting: " + sFileIn);
-        iSentNum = 0;
         // Make room for the intermediate results
         String sShort = Path.GetFileNameWithoutExtension(sFileOut);
         String sFileOutDir = Path.GetDirectoryName(sFileOut) + "/" + sShort;
         String sFileOutLog = Path.GetFullPath( sFileOutDir + ".log");
-        // Clear any previous logging
+        // Check for previous logging
         if (File.Exists(sFileOutLog)) {
           // Make sure to overwrite what is there
           File.WriteAllText(sFileOutLog, "");
         }
+
+        // Open the input file
+        debug("Starting: " + sFileIn);
+        iSentNum = 0;
 
         // Open input file and output file
         using (rdFolia = XmlReader.Create(new StreamReader(sFileIn), rdSet)) {
@@ -571,11 +575,25 @@ namespace FoliaEntity {
           File.Delete(sFileIn);
         }
 
+        // Zip the output file
+        if (util.General.CompressFile(sFileOut, sFileOutGz)) {
+          // Remove the uncompressed file
+          File.Delete(sFileOut);
+        }
+
+        // Check for file-lock
+        if (File.Exists(sFileLock)) {
+          File.Delete(sFileLock);
+        }
 
         // Be positive
         return true;
       } catch (Exception ex) {
         errHandle.DoError("ParseOneFoliaEntity", ex); // Provide standard error message
+        // Check for file-lock
+        if (File.Exists(sFileLock)) {
+          File.Delete(sFileLock);
+        }
         return false;
       }
     }
