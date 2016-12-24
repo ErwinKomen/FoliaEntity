@@ -451,7 +451,7 @@ namespace FoliaEntity {
             // Do something
             errHandle.DoError("parseOneFoliaEntity", "Could not perform docEntityToLinks");
           }
-
+          
           // Second pass: go through the text once more
           int iEntityIndex = -1;
           using (rdFolia = XmlReader.Create(new StreamReader(sFileTmp))) {
