@@ -287,6 +287,9 @@ namespace FoliaEntity {
                   String sSentId = ndxFoliaS.Attributes["xml:id"].Value;
                   // (7) Check for presence of modernization layer
                   bool bDoModern = (ndxFoliaS.SelectSingleNode("./descendant::df:w/child::df:alignment[@class='modernization']", nsFolia) != null);
+                  // (7b) Check for 'contemporary' layer
+                  bool bDoContemporary = (ndxFoliaS.SelectSingleNode("./descendant::df:w/child::df:t[@class='contemporary']", nsFolia) != null);
+
 
                   // We also need to get the full sentence text
                   String sSent = "";
@@ -305,7 +308,7 @@ namespace FoliaEntity {
                       } else sEntity += " ";
                       sEntity += lstEntW[k].Attributes["t"].Value;
                       // Add the id to the list of id's (needed for the modernized layer)
-                      if (bDoModern) {
+                      if (bDoModern || bDoContemporary) {
                         lstId.Add(lstEntW[k].Attributes["id"].Value);
                       }
                     }
@@ -347,6 +350,35 @@ namespace FoliaEntity {
                           errHandle.DoError("ParseOneFoliaEntity/chk1", ex); // Provide standard error message
                           return false;
                         }
+                      } else if (bDoContemporary && iModern < lstId.Count) {
+                        // Check if this id should be treated
+                        String sIdK = lstW[k].ParentNode.Attributes["xml:id"].Value;
+                        String sIdM = lstId[iModern];
+                        int iPos = sIdM.Length - sIdK.Length;
+                        // ============== DEBUG ================
+                        //errHandle.Status("iPos = " + iPos + "sIdK=[" + sIdK + "] sIdM=[" + sIdM + "]\n");
+                        try {
+                          if (iPos >= 0 && sIdM.Substring(iPos) == sIdK) {
+                            // Look for the modernized word
+                            //XmlNode ndxAref = lstW[k].SelectSingleNode("./parent::df:w/child::df:alignment[@class='modernization']/child::df:aref", nsFolia);
+                            //if (ndxAref != null) {
+                            //  if (sModern != "") sModern += " ";
+                            //  sModern += ndxAref.Attributes["t"].Value;
+                            //}
+                            //iModern++;
+
+                            XmlNode ndxContemporaryT = lstW[k].SelectSingleNode("./parent::df:w/child::df:t[@class='contemporary']", nsFolia);
+                            if (ndxContemporaryT != null) {
+                              if (sModern != "") sModern += " ";
+                              sModern += ndxContemporaryT.InnerText;
+                            }
+                            iModern++;
+
+                          }
+                        } catch (Exception ex) {
+                          errHandle.DoError("ParseOneFoliaEntity/chk1", ex); // Provide standard error message
+                          return false;
+                        }
                       }
                     }
 
@@ -362,56 +394,59 @@ namespace FoliaEntity {
                       for (int k = lstAlg.Count - 1; k >= 0; k--) { lstAlg[k].RemoveAll(); lstEnt[j].RemoveChild(lstAlg[k]); }
                     }
 
-                    // Create an entity object to be processed
-                    String sClass = lstEnt[j].Attributes["class"].Value;
-                    String sEntityCreate = (bDoModern && sModern != "") ? sModern : sEntity;
-                    entity oEntity = new entity(this.errHandle, sEntityCreate, sClass, sSent, iOffset.ToString(), idStart);
-                    oEntity.set_debug(bIsDebug);
-                    // Pass on the settings of the different SINGLE_PASS methods
-                    oEntity.set_histograph(bHistograph);
-                    oEntity.set_laundromat(bLaundromat);
-                    oEntity.set_spotlight(bSpotlight);
-                    oEntity.set_apiUrl("histo", sApiHisto);
-                    oEntity.set_apiUrl("spotlight", sApiStart);
-                    oEntity.set_apiUrl("lotus", sApiLotus);
-                    // NOTE: the 'flask' method is document-based, and its api URL is set elsewhere.
+                    // Check: the entity *MUST* have a @class attribute
+                    if (lstEnt[j].Attributes["class"] != null) {
+                      // Create an entity object to be processed
+                      String sClass = lstEnt[j].Attributes["class"].Value;
+                      String sEntityCreate = ((bDoModern || bDoContemporary) && sModern != "") ? sModern : sEntity;
+                      entity oEntity = new entity(this.errHandle, sEntityCreate, sClass, sSent, iOffset.ToString(), idStart);
+                      oEntity.set_debug(bIsDebug);
+                      // Pass on the settings of the different SINGLE_PASS methods
+                      oEntity.set_histograph(bHistograph);
+                      oEntity.set_laundromat(bLaundromat);
+                      oEntity.set_spotlight(bSpotlight);
+                      oEntity.set_apiUrl("histo", sApiHisto);
+                      oEntity.set_apiUrl("spotlight", sApiStart);
+                      oEntity.set_apiUrl("lotus", sApiLotus);
+                      // NOTE: the 'flask' method is document-based, and its api URL is set elsewhere.
 
-                    // ============== DEBUG ===================
-                    //if (sModern.ToLower().Contains("jaarboek")) {
-                    //  int iStop = 1;
-                    //}
-                    // ========================================
+                      // ============== DEBUG ===================
+                      //if (sModern.ToLower().Contains("jaarboek")) {
+                      //  int iStop = 1;
+                      //}
+                      // ========================================
 
-                    if (oEntity.oneEntityToLinks(sConfidence)) {
-                      // Keep track of hits and failures
-                      iHits += oEntity.get_hits();
-                      iFail += oEntity.get_fail();
-                      // Process the alignments that have been found
-                      List<link> lstAlign = oEntity.get_links();
-                      for (int k = 0; k < lstAlign.Count; k++) {
-                        // Process this link
-                        link lnkThis = lstAlign[k];
-                        // Convert this link into an <alignment> item and add it to the current <entity>
-                        XmlDocument pdxAlign = new XmlDocument();
-                        String sAlignModel = "<FoLiA xmlns:xlink='http://www.w3.org/1999/xlink' xmlns='http://ilk.uvt.nl/folia'>" +
-                          "<s><alignment format='application/json' class='NEL' xlink:href='' xlink:type='simple' src=''></alignment>" +
-                          "</s></FoLiA>";
-                        pdxAlign.LoadXml(sAlignModel);
-                        // Set up a namespace manager for folia
-                        XmlNamespaceManager nmsDf = new XmlNamespaceManager(pdxAlign.NameTable);
-                        nmsDf.AddNamespace("df", pdxAlign.DocumentElement.NamespaceURI);
+                      if (oEntity.oneEntityToLinks(sConfidence)) {
+                        // Keep track of hits and failures
+                        iHits += oEntity.get_hits();
+                        iFail += oEntity.get_fail();
+                        // Process the alignments that have been found
+                        List<link> lstAlign = oEntity.get_links();
+                        for (int k = 0; k < lstAlign.Count; k++) {
+                          // Process this link
+                          link lnkThis = lstAlign[k];
+                          // Convert this link into an <alignment> item and add it to the current <entity>
+                          XmlDocument pdxAlign = new XmlDocument();
+                          String sAlignModel = "<FoLiA xmlns:xlink='http://www.w3.org/1999/xlink' xmlns='http://ilk.uvt.nl/folia'>" +
+                            "<s><alignment format='application/json' class='NEL' xlink:href='' xlink:type='simple' src=''></alignment>" +
+                            "</s></FoLiA>";
+                          pdxAlign.LoadXml(sAlignModel);
+                          // Set up a namespace manager for folia
+                          XmlNamespaceManager nmsDf = new XmlNamespaceManager(pdxAlign.NameTable);
+                          nmsDf.AddNamespace("df", pdxAlign.DocumentElement.NamespaceURI);
 
-                        XmlNode ndxAlignment = pdxAlign.SelectSingleNode("./descendant-or-self::df:alignment", nmsDf);
-                        ndxAlignment.Attributes["xlink:href"].Value = lnkThis.uri;
-                        ndxAlignment.Attributes["src"].Value = lnkThis.service;
-                        lstEnt[j].AppendChild(pdxSrc.ImportNode(ndxAlignment, true));
+                          XmlNode ndxAlignment = pdxAlign.SelectSingleNode("./descendant-or-self::df:alignment", nmsDf);
+                          ndxAlignment.Attributes["xlink:href"].Value = lnkThis.uri;
+                          ndxAlignment.Attributes["src"].Value = lnkThis.service;
+                          lstEnt[j].AppendChild(pdxSrc.ImportNode(ndxAlignment, true));
 
-                        // Process logging output
-                        String sLogMsg = sFileShort + "\t" + sSentId + "\t" + sClass + "\t" + sEntity + "\t" + lnkThis.toCsv();
-                        doOneLogLine(sFileOutLog, sLogMsg);
+                          // Process logging output
+                          String sLogMsg = sFileShort + "\t" + sSentId + "\t" + sClass + "\t" + sEntity + "\t" + lnkThis.toCsv();
+                          doOneLogLine(sFileOutLog, sLogMsg);
+                        }
                       }
-                    }
 
+                    }
                   }
 
                   // Process the sentence into the larger text
@@ -589,18 +624,33 @@ namespace FoliaEntity {
         // Check if a zipped file has been unpacked
         if (bZipped && File.Exists(sFileInZip) && File.Exists(sFileIn)) {
           // We have a zipped and unzipped version --> remove the unzipped version
-          File.Delete(sFileIn);
+          try {
+            File.Delete(sFileIn);
+          } catch (Exception ex1) {
+            // Do not complain if file deletion does not work out
+            int iDeletionFailure = 1;
+          }
         }
 
         // Zip the output file
         if (util.General.CompressFile(sFileOut, sFileOutGz)) {
           // Remove the uncompressed file
-          File.Delete(sFileOut);
+          try {
+            File.Delete(sFileOut);
+          } catch (Exception ex1) {
+            // Do not complain if file deletion does not work out
+            int iDeletionFailure = 1;
+          }
         }
 
         // Check for file-lock
         if (File.Exists(sFileLock)) {
-          File.Delete(sFileLock);
+          try {
+            File.Delete(sFileLock);
+          } catch (Exception ex1) {
+            // Do not complain if file deletion does not work out
+            int iDeletionFailure = 1;
+          }
         }
 
         // Be positive
