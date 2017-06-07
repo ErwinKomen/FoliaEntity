@@ -24,6 +24,10 @@ namespace FoliaEntity {
     private bool bFlask = false;      // Use FLASK api
     private bool bLaundromat = false; // Use LOD Laundromat api
     private bool bTwoPass = false;    // Use a Two-pass method
+    private String sApiStart = "http://spotlight.sztaki.hu:2232/rest/";
+    private String sApiLotus = "http://lotus.lodlaundromat.org/retrieve/";
+    private String sApiFlask = "http://flask.fii800.lod.labs.vu.nl";
+    private String sApiHisto = "https://api.histograph.io/search";
     private Regex regQuoted = new Regex("xmlns(\\:(\\w)*)?=\"(.*?)\"");
     // ======================== Getters and setters =======================================
     public void set_method(String sMethods) {
@@ -35,6 +39,14 @@ namespace FoliaEntity {
           case "l": bLaundromat = true; errHandle.Status("Method: use LOD-LAUNDROMAT"); break;
           case "h": bHistograph = true; errHandle.Status("Method: use HISTOGRAPH"); break;
         }
+      }
+    }
+    public void set_apiUrl(String sService, String sUrl) {
+      switch (sService.ToLower()) {
+        case "lotus": this.sApiLotus = sUrl; break;
+        case "flask": this.sApiFlask = sUrl; break;
+        case "histo": this.sApiHisto = sUrl; break;
+        case "spotlight": this.sApiStart = sUrl; break;
       }
     }
     // Class initializers
@@ -359,6 +371,10 @@ namespace FoliaEntity {
                     oEntity.set_histograph(bHistograph);
                     oEntity.set_laundromat(bLaundromat);
                     oEntity.set_spotlight(bSpotlight);
+                    oEntity.set_apiUrl("histo", sApiHisto);
+                    oEntity.set_apiUrl("spotlight", sApiStart);
+                    oEntity.set_apiUrl("lotus", sApiLotus);
+                    // NOTE: the 'flask' method is document-based, and its api URL is set elsewhere.
 
                     // ============== DEBUG ===================
                     //if (sModern.ToLower().Contains("jaarboek")) {
@@ -446,6 +462,7 @@ namespace FoliaEntity {
           entity oDocMethods = new entity(errHandle, "", "", "", "", "");
           // Pass on the settings of the different methods
           oDocMethods.set_flask(bFlask);
+          oDocMethods.set_apiUrl("flask", sApiFlask);
           // Call the method
           if (!oDocMethods.docEntityToLinks(sDocText, lstEntExpr, lstEntIdx, ref lstEntFlask)) {
             // Do something

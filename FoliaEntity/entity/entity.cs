@@ -71,6 +71,14 @@ namespace FoliaEntity {
     public void set_histograph(bool bSet) { this.bHistograph = bSet; }
     public void set_flask(bool bSet) { this.bFlask = bSet; }
     public void set_laundromat(bool bSet) { this.bLaundromat = bSet; }
+    public void set_apiUrl(String sService, String sUrl) {
+      switch(sService.ToLower()) {
+        case "lotus": this.sApiLotus = sUrl; break;
+        case "flask": this.sApiFlask = sUrl; break;
+        case "histo": this.sApiHisto = sUrl; break;
+        case "spotlight": this.sApiStart = sUrl; break;
+      }
+    }
 
     /* -------------------------------------------------------------------------------------
      * Name:        oneEntityToLinks

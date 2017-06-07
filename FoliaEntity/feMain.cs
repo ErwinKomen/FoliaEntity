@@ -40,6 +40,12 @@ namespace FoliaEntity {
       String sAnnot = "";       // Name of annotator
       String sLogFile = "";     // Name of log file
       String sMethods = "";     // Methods to be used
+      String sApiType = "";     // Type of API
+      String sApiUrl = "";
+      String sApiStart = "";
+      String sApiLotus = "";
+      String sApiFlask = "";
+      String sApiHisto = "";
       int iHits = 0;            // Total hits
       int iFail = 0;            // Total failures
       bool bIsDebug = false;    // Debugging
@@ -74,6 +80,22 @@ namespace FoliaEntity {
                 break;
               case "g": // Keep garbage for manual inspection
                 bKeepGarbage = true;
+                break;
+              case "u": // Allow setting the URL of one of the API's
+                // NOTE: at least 2 arguments must follow
+                if (i >= args.Length -2) {
+                  // Give an appropriate warning message and exit
+                  SyntaxError("The [-u] option requires exactly two following string arguments: <method (f,s,h,l)> <url>");
+                } else {
+                  sApiType = args[++i]; sApiUrl = args[++i];
+                  switch (sApiType.ToLower()) {
+                    case "h": sApiHisto = sApiUrl; break;
+                    case "f": sApiFlask = sApiUrl; break;
+                    case "s": sApiStart = sApiUrl; break;
+                    case "l": sApiLotus = sApiUrl; break;
+                    default: SyntaxError("Unknown -u option: ["+ sApiUrl + "]. Use 'f', 's', 'h', 'l'"); break;
+                  }
+                }
                 break;
             }
           } else {
@@ -121,6 +143,18 @@ namespace FoliaEntity {
         }
         // Call the main entry point for the conversion
         feConv objConv = new feConv(sMethods);
+        // Possibly set API url's
+        if (sApiStart != "") objConv.set_apiUrl("spotlight", sApiStart);
+        if (sApiHisto != "") objConv.set_apiUrl("histo", sApiHisto);
+        if (sApiFlask != "") objConv.set_apiUrl("flask", sApiFlask);
+        if (sApiLotus != "") objConv.set_apiUrl("lotus", sApiLotus);
+
+        /*
+        oEntity.set_apiUrl("histo", sApiHisto);
+        oEntity.set_apiUrl("spotlight", sApiStart);
+        oEntity.set_apiUrl("lotus", sApiLotus);
+        */
+
 
         // Other initialisations
         // Initialise the Treebank Xpath functions, which may make use of tb:matches()
