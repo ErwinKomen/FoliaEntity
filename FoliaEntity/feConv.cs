@@ -257,7 +257,7 @@ namespace FoliaEntity {
                 ndxFoliaS = pdxAnn.SelectSingleNode("./descendant-or-self::df:annotations", nsFolia);
                 oXmlTools.AddXmlChild(ndxFoliaS, "alignment-annotation",
                   "annotator", sAnnotator, "attribute",
-                  "annotatortype", "automatic", "attribute",
+                  "annotatortype", "auto", "attribute",
                   "set", "ErwinKomen-NEL", "attribute");
                 // (4) Write the new <annotations> node to the writer
                 XmlReader rdResult = XmlReader.Create(new StringReader(ndxFoliaS.SelectSingleNode("./descendant-or-self::df:annotations", nsFolia).OuterXml));
@@ -503,7 +503,7 @@ namespace FoliaEntity {
             // Do something
             errHandle.DoError("parseOneFoliaEntity", "Could not perform docEntityToLinks");
           }
-          
+
           // Second pass: go through the text once more
           int iEntityIndex = -1;
           using (rdFolia = XmlReader.Create(new StreamReader(sFileTmp))) {
@@ -675,7 +675,7 @@ namespace FoliaEntity {
       File.AppendAllText(sFileOutLog, sLogMsg + "\n");
     }
 
- 
+
 
     /* -------------------------------------------------------------------------------------
      * Name:  foliaTokenize
@@ -733,7 +733,7 @@ namespace FoliaEntity {
       }
     }
 
- 
+
     /* -------------------------------------------------------------------------------------
      * Name:  WriteShallowNode
      * Goal:  Copy piece-by-piece
@@ -791,9 +791,9 @@ namespace FoliaEntity {
     /// <param name="sMsg"></param>
     static void debug(String sMsg) { Console.WriteLine(sMsg); }
 
- 
 
- 
+
+
   }
 }
 
