@@ -255,10 +255,15 @@ namespace FoliaEntity {
                 // (3) Add the Lassy syntactic annotations
                 oXmlTools.SetXmlDocument(pdxAnn);
                 ndxFoliaS = pdxAnn.SelectSingleNode("./descendant-or-self::df:annotations", nsFolia);
+                // Proycon addition: annotatortyp attribute must be:
+                //   either 'manual'
+                //   or     'auto'
+                // Note: not 'automatic', just 'auto'
                 oXmlTools.AddXmlChild(ndxFoliaS, "alignment-annotation",
                   "annotator", sAnnotator, "attribute",
                   "annotatortype", "auto", "attribute",
-                  "set", "ErwinKomen-NEL", "attribute");
+                  "set", "ErwinKomen-NEL", "attribute",
+                  "xmlns", pdxAnn.DocumentElement.NamespaceURI, "attribute"); // Issue #6: explicitly pass on the 'xmlns' attribute!!
                 // (4) Write the new <annotations> node to the writer
                 XmlReader rdResult = XmlReader.Create(new StringReader(ndxFoliaS.SelectSingleNode("./descendant-or-self::df:annotations", nsFolia).OuterXml));
                 wrFolia.WriteNode(rdResult, true);
@@ -425,24 +430,27 @@ namespace FoliaEntity {
                         for (int k = 0; k < lstAlign.Count; k++) {
                           // Process this link
                           link lnkThis = lstAlign[k];
-                          // Convert this link into an <alignment> item and add it to the current <entity>
-                          XmlDocument pdxAlign = new XmlDocument();
-                          String sAlignModel = "<FoLiA xmlns:xlink='http://www.w3.org/1999/xlink' xmlns='http://ilk.uvt.nl/folia'>" +
-                            "<s><alignment format='application/json' class='NEL' xlink:href='' xlink:type='simple' src=''></alignment>" +
-                            "</s></FoLiA>";
-                          pdxAlign.LoadXml(sAlignModel);
-                          // Set up a namespace manager for folia
-                          XmlNamespaceManager nmsDf = new XmlNamespaceManager(pdxAlign.NameTable);
-                          nmsDf.AddNamespace("df", pdxAlign.DocumentElement.NamespaceURI);
+                          // Only proceed if this link is not empty
+                          if (lnkThis != null && lnkThis.service != "") {
+                            // Convert this link into an <alignment> item and add it to the current <entity>
+                            XmlDocument pdxAlign = new XmlDocument();
+                            String sAlignModel = "<FoLiA xmlns:xlink='http://www.w3.org/1999/xlink' xmlns='http://ilk.uvt.nl/folia'>" +
+                              "<s><alignment format='application/json' class='NEL' xlink:href='' xlink:type='simple' src=''></alignment>" +
+                              "</s></FoLiA>";
+                            pdxAlign.LoadXml(sAlignModel);
+                            // Set up a namespace manager for folia
+                            XmlNamespaceManager nmsDf = new XmlNamespaceManager(pdxAlign.NameTable);
+                            nmsDf.AddNamespace("df", pdxAlign.DocumentElement.NamespaceURI);
 
-                          XmlNode ndxAlignment = pdxAlign.SelectSingleNode("./descendant-or-self::df:alignment", nmsDf);
-                          ndxAlignment.Attributes["xlink:href"].Value = lnkThis.uri;
-                          ndxAlignment.Attributes["src"].Value = lnkThis.service;
-                          lstEnt[j].AppendChild(pdxSrc.ImportNode(ndxAlignment, true));
+                            XmlNode ndxAlignment = pdxAlign.SelectSingleNode("./descendant-or-self::df:alignment", nmsDf);
+                            ndxAlignment.Attributes["xlink:href"].Value = lnkThis.uri;
+                            ndxAlignment.Attributes["src"].Value = lnkThis.service;
+                            lstEnt[j].AppendChild(pdxSrc.ImportNode(ndxAlignment, true));
 
-                          // Process logging output
-                          String sLogMsg = sFileShort + "\t" + sSentId + "\t" + sClass + "\t" + sEntity + "\t" + lnkThis.toCsv();
-                          doOneLogLine(sFileOutLog, sLogMsg);
+                            // Process logging output
+                            String sLogMsg = sFileShort + "\t" + sSentId + "\t" + sClass + "\t" + sEntity + "\t" + lnkThis.toCsv();
+                            doOneLogLine(sFileOutLog, sLogMsg);
+                          }
                         }
                       }
 
@@ -549,7 +557,7 @@ namespace FoliaEntity {
                       // Get the FLASK entity resolution, which should provide exactly one additional alignment
                       link lnkThis = lstEntFlask[iEntityIndex];
 
-                      if (lnkThis != null) {
+                      if (lnkThis != null && lnkThis.service != "") {
                         // Convert this link into an <alignment> item and add it to the current <entity>
                         XmlDocument pdxAlign = new XmlDocument();
                         String sAlignModel = "<FoLiA xmlns:xlink='http://www.w3.org/1999/xlink' xmlns='http://ilk.uvt.nl/folia'>" +
