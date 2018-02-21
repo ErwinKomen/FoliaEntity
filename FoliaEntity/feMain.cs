@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.IO;
+using System.Reflection;
 using FoliaEntity.util;
 
 namespace FoliaEntity {
@@ -31,6 +32,7 @@ namespace FoliaEntity {
     static ErrHandle errHandle = new ErrHandle();
     static String[] arInput;   // Array of input files
     static String strOutDir;   // Output directory
+    static Version loc_version = new Version("2.1.0.1");
     // =================== Local variables ===============================================
 
     // Command-line entry point + argument handling
@@ -60,6 +62,9 @@ namespace FoliaEntity {
           if (sArg.StartsWith("-")) {
             // Check out the arguments
             switch (sArg.Substring(1)) {
+              case "v": // Only provide version information
+                errHandle.Status(get_version());
+                return;
               case "i": // Input file or directory with .folia.xml files
                 sInput = args[++i];
                 break;
@@ -208,6 +213,23 @@ namespace FoliaEntity {
         "\n\n\tMethods: file, sentence, two-pass\n" +
         "\n\n\tNote: output directory must differ from input one\n" +
         "\n\tCheckpoint #" + sChk);
+    }
+
+    /* -------------------------------------------------------------------------------------
+     * Name:  get_version
+     * Goal:  Get the version number
+     * History:
+     * 21/feb/2018 ERK Created
+       ------------------------------------------------------------------------------------- */
+    static String get_version() {
+      String sVersion = "";
+      // Version version = Assembly.GetExecutingAssembly().GetName().Version;
+      Version version = loc_version;
+      if (version != null) {
+        sVersion = String.Format("FoliaEntity version: {0}.{1}.{2}.{3}",
+          version.Major, version.Minor, version.Build, version.Revision);
+      }
+      return sVersion;
     }
 
   }

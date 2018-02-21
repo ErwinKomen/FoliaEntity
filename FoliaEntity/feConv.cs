@@ -431,7 +431,7 @@ namespace FoliaEntity {
                           // Process this link
                           link lnkThis = lstAlign[k];
                           // Only proceed if this link is not empty
-                          if (lnkThis != null && lnkThis.service != "") {
+                          if (lnkThis != null && lnkThis.service != "" && lnkThis.uri != "") {
                             // Convert this link into an <alignment> item and add it to the current <entity>
                             XmlDocument pdxAlign = new XmlDocument();
                             String sAlignModel = "<FoLiA xmlns:xlink='http://www.w3.org/1999/xlink' xmlns='http://ilk.uvt.nl/folia'>" +
