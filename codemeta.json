@@ -1,0 +1,92 @@
+{
+    "@context": [
+        "https://doi.org/10.5063/schema/codemeta-2.0",
+        "http://schema.org",
+        {
+            "entryPoints": { "@reverse": "schema:actionApplication" },
+            "interfaceType": { "@id": "codemeta:interfaceType" }
+        }
+    ],
+    "@type": "SoftwareSourceCode",
+    "identifier": "foliaentity",
+    "name": "FoliaEntity",
+    "version": "unknown",
+    "description": "FoliaEntity enriches an existing named entity layer in one or more FoLiA documents by linking the entities to external resources, such as spotlight.",
+    "license": "unknown",
+	"url": "https://github.com/ErwinKomen/FoliaEntity",
+    "producer": {
+        "@id": "https://www.ru.nl/clst",
+        "@type": "Organization",
+        "name": "Centre for Language and Speech Technology",
+        "url": "https://www.ru.nl/clst",
+        "parentOrganization": {
+            "@id": "https://www.ru.nl/cls",
+            "@type": "Organization",
+            "name": "Centre for Language Studies",
+            "url": "https://www.ru.nl/cls",
+            "parentOrganization": {
+                "@id": "https://www.ru.nl",
+                "name": "Radboud University",
+                "@type": "Organization",
+                "url": "https://www.ru.nl",
+                "location": {
+                    "@type": "Place",
+                    "name": "Nijmegen"
+                }
+            }
+
+        }
+    },
+    "author": [
+		{
+			"@type": "Person",
+			"givenName": "Erwin",
+			"familyName": "Komen",
+			"affiliation": { "@id": "https://www.ru.nl/clst" }
+		}
+	],
+	"sourceOrganization": { "@id": "https://www.ru.nl/clst" },
+	"programmingLanguage": {
+		"@type": "ComputerLanguage",
+		"identifier": "c#",
+		"name": "C#"
+	},
+	"operatingSystem": "POSIX",
+	"codeRepository": "https://github.com/ErwinKomen/FoliaEntity",
+    "softwareRequirements": [
+        {
+			"@type": "SoftwareApplication",
+			"identifier": "mono",
+			"name": "mono"
+		}
+	],
+	"funder": [
+		{
+			"@type": "Organization",
+			"name": "Nederlab",
+			"url": "http://www.nederlab.nl"
+		}
+	],
+	"issueTracker": "https://github.com/ErwinKomen/FoliaEntity/issues",
+	"developmentStatus": "active",
+	"keywords":  [ "nlp", "natural language processing", "entity linking" ],
+    "referencePublication": [
+		{
+			"@type": "TechArticle",
+			"name": "Nederlab Project: EntityLinking",
+			"author": [ "Erwin Komen" ],
+            "datePublished": "2017",
+			"url": "http://erwinkomen.ruhosting.nl/nedlab/Nederlab-EntityLinking-Voortgang-2017Jun.pdf"
+		}
+	],
+	"dateCreated": "2017",
+    "entryPoints":
+        {
+            "@type": "EntryPoint",
+            "name": "FoliaEntity",
+            "urlTemplate": "file:///FoliaEntity",
+            "description": "Command-line interface",
+            "interfaceType": "CLI"
+        }
+    ]
+}
