@@ -91,7 +91,7 @@
             "name": "FoliaEntity",
             "urlTemplate": "file:///FoliaEntity",
             "description": "Command-line interface",
-            "interfaceType":  "CLI"
+            "interfaceType": "CLI"
         }
     ]
 }
