@@ -84,14 +84,14 @@
 			"url": "http://erwinkomen.ruhosting.nl/nedlab/Nederlab-EntityLinking-Voortgang-2017Jun.pdf"
 		}
 	],
-	"dateCreated": "2017",
+    "dateCreated": "2017",
     "entryPoints": [
         {
             "@type": "EntryPoint",
             "name": "FoliaEntity",
             "urlTemplate": "file:///FoliaEntity",
             "description": "Command-line interface",
-            "interfaceType": "CLI"
+            "interfaceType":  "CLI"
         }
     ]
 }
